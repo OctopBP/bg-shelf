@@ -22,6 +22,12 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Падаем сразу и понятно, если build-args не переданы: иначе Next вшил бы
+# пустые значения и приложение упало бы только в рантайме ("URL and Key
+# are required to create a Supabase client").
+RUN test -n "$NEXT_PUBLIC_SUPABASE_URL" && test -n "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
+  || (echo "✗ Передайте build-args NEXT_PUBLIC_SUPABASE_URL и NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" && exit 1)
+
 RUN npm run build
 
 # ---- runner: минимальный образ только с нужными файлами ----
