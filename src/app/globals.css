@@ -1,26 +1,229 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ---------------------------------------------------------------------------
+   Design tokens — "rulebook" look: black & white canvas, pure bright colors,
+   thick black outlines, chunky sticker shadows. Inspired by retro board-game
+   manuals — multi-color lettering, fat outlines, hard offset shadows.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-paper: #0d0d0d; /* black canvas */
+  --color-surface: #ffffff; /* white sticker surfaces */
+  --color-ink: #0d0d0d; /* black — text on white, all outlines */
+  --color-chalk: #ffffff; /* white text on the black canvas */
+  --color-muted: #9a9a9a; /* muted text on black */
+  --color-line: #0d0d0d; /* outlines are black */
+
+  /* Pure bright colors (keep in sync with src/lib/palette.ts) */
+  --color-orange: #ff5a1f;
+  --color-green: #21b24c;
+  --color-blue: #2f9be0;
+  --color-pink: #ec5fa6;
+  --color-yellow: #ffc400;
+  --color-purple: #9b5de5;
+  --color-red: #ec2b2b;
+
+  --color-brand: #ff5a1f; /* primary = orange */
+  --color-brand-dark: #c23f0f; /* pressed shadow */
+  --color-brand-soft: #ffe9dd; /* pale fill / placeholder */
+
+  --color-coral: #ec2b2b; /* destructive / live = red */
+  --color-coral-dark: #b81f1f;
+  --color-mint: #21b24c; /* positive = green */
+  --color-mint-soft: #e3f7e9;
+  --color-amber: #ffb300; /* rating star */
+
+  --radius-xl2: 1.25rem;
+
+  /* Shared height for inputs/buttons sitting in one row */
+  --control-h: 3rem;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-unbounded);
+  --font-sans: var(--font-onest);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-paper);
+  color: var(--color-chalk);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   Reusable component classes
+--------------------------------------------------------------------------- */
+@layer components {
+  /* Chunky pressable button — bright fill, fat black outline, hard shadow */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    border: 3px solid var(--color-ink);
+    font-weight: 700;
+    line-height: 1;
+    transition:
+      transform 0.08s ease,
+      box-shadow 0.08s ease,
+      background-color 0.15s ease;
+    user-select: none;
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  .btn-brand {
+    background-color: var(--color-brand);
+    color: #fff;
+    box-shadow: 0 5px 0 0 var(--color-brand-dark);
+  }
+  .btn-brand:hover {
+    background-color: var(--color-brand-dark);
+  }
+  .btn-brand:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 0 var(--color-brand-dark);
+  }
+
+  .btn-coral {
+    background-color: var(--color-coral);
+    color: #fff;
+    box-shadow: 0 5px 0 0 var(--color-coral-dark);
+  }
+  .btn-coral:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 0 var(--color-coral-dark);
+  }
+
+  /* Outline button for use on WHITE surfaces (e.g. modal cancel) */
+  .btn-ghost {
+    background-color: #fff;
+    color: var(--color-ink);
+    box-shadow: 0 5px 0 0 var(--color-ink);
+  }
+  .btn-ghost:hover {
+    background-color: #f1f1f1;
+  }
+  .btn-ghost:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 0 var(--color-ink);
+  }
+
+  /* Outline button for use on the BLACK canvas (e.g. sign out) */
+  .btn-onblack {
+    background-color: transparent;
+    color: #fff;
+    border-color: #fff;
+    box-shadow: 0 5px 0 0 rgba(255, 255, 255, 0.35);
+  }
+  .btn-onblack:hover {
+    background-color: #fff;
+    color: var(--color-ink);
+  }
+  .btn-onblack:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.35);
+  }
+
+  /* Round icon button — white sticker, fat black outline, chunky 3D shadow.
+     Matches .btn-ghost so icon buttons sit and press like the pill buttons. */
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background-color: #fff;
+    border: 3px solid var(--color-ink);
+    color: var(--color-ink);
+    box-shadow: 0 5px 0 0 var(--lift, var(--color-ink));
+    transition:
+      transform 0.08s ease,
+      box-shadow 0.08s ease,
+      background-color 0.15s ease;
+    user-select: none;
+  }
+  .icon-btn:hover:not(:disabled) {
+    background-color: #f1f1f1;
+  }
+  .icon-btn:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 0 var(--lift, var(--color-ink));
+  }
+  .icon-btn:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  /* White sticker surface — fat black outline + hard offset shadow */
+  .surface {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    border: 3px solid var(--color-ink);
+    border-radius: var(--radius-xl2);
+    box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.14);
+  }
+
+  /* Game tile — white card with a bright colored ring (set --ring inline) */
+  .tile {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    border: 3px solid var(--color-ink);
+    border-radius: var(--radius-xl2);
+    box-shadow: 0 0 0 4px var(--ring, var(--color-brand));
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease;
+  }
+  .tile:hover {
+    transform: translate(-3px, -5px);
+    box-shadow:
+      0 0 0 4px var(--ring, var(--color-brand)),
+      10px 14px 0 0 var(--ring, var(--color-brand));
+  }
+
+  /* Text inputs — white with fat black outline, chunky base shadow to match
+     the raised buttons; bright focus ring stacks on top of the base. */
+  .field {
+    width: 100%;
+    border-radius: var(--radius-xl2);
+    background-color: #fff;
+    border: 3px solid var(--color-ink);
+    color: var(--color-ink);
+    box-shadow: 0 5px 0 0 var(--lift, var(--color-ink));
+    transition:
+      box-shadow 0.15s ease;
+  }
+  .field::placeholder {
+    color: var(--color-ink);
+    opacity: 0.45;
+  }
+  .field:focus {
+    outline: none;
+    box-shadow: 0 5px 0 0 var(--color-brand);
+  }
+
+  /* Uniform height for controls living in the same row (command bar) */
+  .control-h {
+    height: var(--control-h);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-pop-in {
+  animation: pop-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
