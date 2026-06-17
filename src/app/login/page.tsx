@@ -52,7 +52,7 @@ export default function LoginPage() {
             <IconDice5Filled size={26} />
           </span>
           <RainbowText
-            text="Моя коллекция"
+            text="Полка"
             className="font-display text-2xl font-extrabold tracking-tight"
           />
           <p className="mt-1 text-sm font-medium text-ink/55">

@@ -17,7 +17,7 @@ const onest = Onest({
 });
 
 export const metadata: Metadata = {
-  title: "Моя коллекция настолок",
+  title: "Полка — коллекция настольных игр",
   description:
     "Коллекция настольных игр с голосовым вводом, добавлением по фото и данными из BoardGameGeek",
 };
