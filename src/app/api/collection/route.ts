@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   addGameToCollection,
@@ -6,13 +6,14 @@ import {
   updateCollectionItem,
   updateGameInfo,
   listCollection,
+  listAllGames,
   type GameInfoUpdate,
 } from "@/lib/collection";
 
 export const maxDuration = 120;
 
-/** Текущая коллекция пользователя (читается клиентом вместо прямого запроса к БД). */
-export async function GET() {
+/** Игры одной коллекции (?collectionId=…) или всех коллекций (?all=1). */
+export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -21,8 +22,19 @@ export async function GET() {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
+  const { searchParams } = request.nextUrl;
+  const collectionId = searchParams.get("collectionId");
+  const all = searchParams.get("all");
+
   try {
-    const games = await listCollection(supabase, user.id);
+    if (all) {
+      const games = await listAllGames(supabase);
+      return NextResponse.json({ games });
+    }
+    if (!collectionId) {
+      return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
+    }
+    const games = await listCollection(supabase, collectionId);
     return NextResponse.json({ games });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -41,6 +53,10 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
+  const collectionId = body?.collectionId;
+  if (typeof collectionId !== "string" || !collectionId) {
+    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
+  }
   const items: Array<{ bggId: number; tags?: string[] }> = body?.items;
   if (!Array.isArray(items) || items.length === 0) {
     return NextResponse.json({ error: "Список игр пуст" }, { status: 400 });
@@ -52,9 +68,10 @@ export async function POST(request: Request) {
     try {
       const { name } = await addGameToCollection(
         supabase,
-        user.id,
+        collectionId,
         Number(item.bggId),
-        item.tags ?? []
+        item.tags ?? [],
+        user.id
       );
       added.push(name);
     } catch {
@@ -75,13 +92,17 @@ export async function DELETE(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
+  const collectionId = body?.collectionId;
+  if (typeof collectionId !== "string" || !collectionId) {
+    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
+  }
   const bggId = Number(body?.bggId);
   if (!bggId) {
     return NextResponse.json({ error: "Не указан bggId" }, { status: 400 });
   }
 
   try {
-    await removeGameFromCollection(supabase, user.id, bggId);
+    await removeGameFromCollection(supabase, collectionId, bggId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -99,6 +120,10 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
+  const collectionId = body?.collectionId;
+  if (typeof collectionId !== "string" || !collectionId) {
+    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
+  }
   const bggId = Number(body?.bggId);
   if (!bggId) {
     return NextResponse.json({ error: "Не указан bggId" }, { status: 400 });
@@ -122,7 +147,7 @@ export async function PATCH(request: Request) {
 
   try {
     if (tags !== undefined || notes !== undefined) {
-      await updateCollectionItem(supabase, user.id, bggId, {
+      await updateCollectionItem(supabase, collectionId, bggId, {
         tags,
         notes: notes === undefined ? undefined : notes || null,
       });

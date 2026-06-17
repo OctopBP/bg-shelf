@@ -23,7 +23,7 @@ export default async function HomePage() {
             </span>
             <div className="leading-tight">
               <RainbowText
-                text="Моя коллекция"
+                text="Полка"
                 className="font-display text-xl font-extrabold tracking-tight sm:text-2xl"
               />
               <p className="mt-0.5 text-xs font-semibold uppercase tracking-widest text-muted">

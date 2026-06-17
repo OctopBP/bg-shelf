@@ -36,12 +36,18 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ error: "Пустая команда" }, { status: 400 });
   }
-  console.log(`[command ${reqId}] команда: «${command.trim()}»`);
+  const collectionId = body?.collectionId;
+  if (typeof collectionId !== "string" || !collectionId) {
+    console.warn(`[command ${reqId}] не указана коллекция → 400`);
+    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
+  }
+  console.log(`[command ${reqId}] команда: «${command.trim()}» в коллекции ${collectionId}`);
 
   try {
     const result = await runCollectionAgent(
       command.trim(),
       supabase,
+      collectionId,
       user.id,
       reqId
     );

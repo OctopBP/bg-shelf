@@ -12,7 +12,17 @@ import {
   updateItemFields,
   updateGame,
   selectItems,
+  selectAllItems,
+  selectMemberships,
+  selectItemCollectionIds,
+  createCollection,
+  renameCollection,
+  deleteCollection,
+  memberEmails,
+  shareCollection,
+  removeMember,
   type GameRecord,
+  type Role,
 } from "@/lib/mock/store";
 
 // --- Auth -------------------------------------------------------------------
@@ -97,32 +107,40 @@ function eqValue(url: URL, column: string): string | undefined {
   return raw.startsWith("eq.") ? raw.slice(3) : raw;
 }
 
+function wantsObject(request: Request): boolean {
+  return (request.headers.get("accept") ?? "").includes("vnd.pgrst.object");
+}
+
+const PGRST116 = HttpResponse.json(
+  { code: "PGRST116", message: "Results contain 0 rows" },
+  { status: 406 }
+);
+
 const restHandlers = [
-  // collection_items joined select
+  // collection_items: одна коллекция (?collection_id=eq…), все игры (embed
+  // collections(name)) или просто список collection_id для счётчиков.
   http.get("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
-    const userId = eqValue(url, "user_id") ?? DEMO_USER.id;
-    let rows = selectItems(userId);
-
-    // Дополнительные eq-фильтры (например, ?bgg_id=eq.123 на странице игры)
+    const select = url.searchParams.get("select") ?? "";
+    const collectionId = eqValue(url, "collection_id");
     const bggId = eqValue(url, "bgg_id");
+
+    // select=collection_id (без embed games) — запрос для подсчёта игр
+    if (!select.includes("games")) {
+      return HttpResponse.json(selectItemCollectionIds(DEMO_USER.id));
+    }
+
+    let rows =
+      collectionId !== undefined
+        ? selectItems(collectionId)
+        : selectAllItems(DEMO_USER.id);
     if (bggId !== undefined) {
       rows = rows.filter((r) => r.bgg_id === Number(bggId));
     }
 
-    // .single()/.maybeSingle() запрашивают один объект через Accept-заголовок
-    const wantsObject = (request.headers.get("accept") ?? "").includes(
-      "vnd.pgrst.object"
-    );
-    if (wantsObject) {
-      if (rows.length === 1) return HttpResponse.json(rows[0]);
-      // 0 строк → PGRST116, который supabase-js трактует как null в maybeSingle
-      return HttpResponse.json(
-        { code: "PGRST116", message: "Results contain 0 rows" },
-        { status: 406 }
-      );
+    if (wantsObject(request)) {
+      return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
     }
-
     return HttpResponse.json(rows);
   }),
 
@@ -134,9 +152,10 @@ const restHandlers = [
     >;
     for (const row of rows) {
       upsertItem(
-        String(row.user_id),
+        String(row.collection_id),
         Number(row.bgg_id),
-        (row.tags as string[]) ?? []
+        (row.tags as string[]) ?? [],
+        (row.added_by as string | null) ?? null
       );
     }
     return HttpResponse.json([], { status: 201 });
@@ -144,10 +163,7 @@ const restHandlers = [
 
   http.delete("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
-    deleteItem(
-      String(eqValue(url, "user_id")),
-      Number(eqValue(url, "bgg_id"))
-    );
+    deleteItem(String(eqValue(url, "collection_id")), Number(eqValue(url, "bgg_id")));
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -158,7 +174,7 @@ const restHandlers = [
       notes?: string | null;
     };
     updateItemFields(
-      String(eqValue(url, "user_id")),
+      String(eqValue(url, "collection_id")),
       Number(eqValue(url, "bgg_id")),
       {
         ...(body.tags !== undefined ? { tags: body.tags } : {}),
@@ -166,6 +182,87 @@ const restHandlers = [
       }
     );
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // collection_members: список коллекций пользователя (embed collections) или
+  // проверка роли в одной коллекции (?collection_id=eq…&user_id=eq…).
+  http.get("*/rest/v1/collection_members", ({ request }) => {
+    const url = new URL(request.url);
+    const select = url.searchParams.get("select") ?? "";
+    const userId = eqValue(url, "user_id") ?? DEMO_USER.id;
+    const collectionId = eqValue(url, "collection_id");
+
+    if (select.includes("collections")) {
+      return HttpResponse.json(selectMemberships(userId));
+    }
+
+    const rows = selectMemberships(userId)
+      .filter((m) => !collectionId || m.collections?.id === collectionId)
+      .map((m) => ({ role: m.role }));
+    if (wantsObject(request)) {
+      return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
+    }
+    return HttpResponse.json(rows);
+  }),
+
+  http.delete("*/rest/v1/collection_members", ({ request }) => {
+    const url = new URL(request.url);
+    removeMember(
+      String(eqValue(url, "collection_id")),
+      String(eqValue(url, "user_id"))
+    );
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // collections: переименование и удаление
+  http.patch("*/rest/v1/collections", async ({ request }) => {
+    const url = new URL(request.url);
+    const body = (await request.json()) as { name?: string };
+    if (body.name !== undefined) {
+      renameCollection(String(eqValue(url, "id")), body.name);
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/rest/v1/collections", ({ request }) => {
+    const url = new URL(request.url);
+    deleteCollection(String(eqValue(url, "id")));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // RPC: создание коллекции
+  http.post("*/rest/v1/rpc/create_collection", async ({ request }) => {
+    const body = (await request.json()) as { name: string };
+    const collection = createCollection(DEMO_USER.id, body.name);
+    return HttpResponse.json(collection);
+  }),
+
+  // RPC: поделиться коллекцией по email
+  http.post("*/rest/v1/rpc/share_collection", async ({ request }) => {
+    const body = (await request.json()) as {
+      cid: string;
+      invitee_email: string;
+      member_role: Role;
+    };
+    const err = shareCollection(
+      body.cid,
+      body.invitee_email,
+      body.member_role,
+      DEMO_USER.id
+    );
+    if (err) {
+      return HttpResponse.json(
+        { code: "P0001", message: err },
+        { status: 400 }
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // RPC: участники коллекции с email
+  http.post("*/rest/v1/rpc/collection_member_emails", async ({ request }) => {
+    const body = (await request.json()) as { cid: string };
+    return HttpResponse.json(memberEmails(body.cid));
   }),
 
   // upsert games cache (one object or an array)

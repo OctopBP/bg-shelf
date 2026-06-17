@@ -39,7 +39,13 @@ function toForm(game: CollectionGame): EditableInfo {
   };
 }
 
-export default function GameDetail({ game }: { game: CollectionGame }) {
+export default function GameDetail({
+  game,
+  canEdit,
+}: {
+  game: CollectionGame;
+  canEdit: boolean;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -77,6 +83,7 @@ export default function GameDetail({ game }: { game: CollectionGame }) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          collectionId: game.collectionId,
           bggId: game.bggId,
           tags,
           notes,
@@ -108,7 +115,10 @@ export default function GameDetail({ game }: { game: CollectionGame }) {
       await fetch("/api/collection", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bggId: game.bggId }),
+        body: JSON.stringify({
+          collectionId: game.collectionId,
+          bggId: game.bggId,
+        }),
       });
       router.push("/");
       router.refresh();
@@ -143,13 +153,15 @@ export default function GameDetail({ game }: { game: CollectionGame }) {
               <IconExternalLink size={18} stroke={2.5} />
               <span className="hidden sm:inline">BGG</span>
             </a>
-            <button
-              onClick={startEditing}
-              className="btn btn-brand px-4 py-2 text-sm"
-            >
-              <IconPencil size={18} stroke={2.5} />
-              Редактировать
-            </button>
+            {canEdit && (
+              <button
+                onClick={startEditing}
+                className="btn btn-brand px-4 py-2 text-sm"
+              >
+                <IconPencil size={18} stroke={2.5} />
+                Редактировать
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-2">

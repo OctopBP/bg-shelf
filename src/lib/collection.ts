@@ -3,6 +3,10 @@ import { getBggGameDetails } from "./bgg";
 
 export interface CollectionGame {
   id: string;
+  /** Коллекция, которой принадлежит эта запись. */
+  collectionId: string;
+  /** Имя коллекции — заполняется только в сводном виде «Все игры». */
+  collectionName?: string;
   bggId: number;
   name: string;
   /** Оригинальное название (обычно английское); null, если совпадает с name */
@@ -36,8 +40,11 @@ export interface GameInfoUpdate {
 /** Приводит строку joined-select (collection_items + games) к CollectionGame. */
 function mapRow(row: Record<string, unknown>): CollectionGame {
   const game = row.games as unknown as Record<string, unknown>;
+  const collection = row.collections as Record<string, unknown> | undefined;
   return {
     id: row.id as string,
+    collectionId: row.collection_id as string,
+    ...(collection ? { collectionName: collection.name as string } : {}),
     bggId: row.bgg_id as number,
     name: game.name as string,
     originalName: (game.original_name as string | null) ?? null,
@@ -58,14 +65,15 @@ function mapRow(row: Record<string, unknown>): CollectionGame {
   };
 }
 
-/** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию пользователя. */
+/** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию. */
 export async function addGameToCollection(
   supabase: SupabaseClient,
-  userId: string,
+  collectionId: string,
   bggId: number,
-  tags: string[] = []
+  tags: string[] = [],
+  addedBy?: string
 ): Promise<{ name: string }> {
-  console.log(`[collection] addGameToCollection bggId=${bggId}, tags=[${tags.join(", ")}]`);
+  console.log(`[collection] addGameToCollection collection=${collectionId} bggId=${bggId}, tags=[${tags.join(", ")}]`);
   const details = await getBggGameDetails(bggId);
   if (!details) {
     console.error(`[collection] BGG детали для id=${bggId} не найдены`);
@@ -96,49 +104,49 @@ export async function addGameToCollection(
   }
 
   const { error: itemError } = await supabase.from("collection_items").upsert(
-    { user_id: userId, bgg_id: bggId, tags },
-    { onConflict: "user_id,bgg_id" }
+    { collection_id: collectionId, bgg_id: bggId, tags, added_by: addedBy ?? null },
+    { onConflict: "collection_id,bgg_id" }
   );
   if (itemError) {
     console.error(`[collection] upsert collection_items упал:`, itemError);
     throw new Error(`Не удалось добавить в коллекцию: ${itemError.message}`);
   }
 
-  console.log(`[collection] «${details.name}» добавлена для user=${userId}`);
+  console.log(`[collection] «${details.name}» добавлена в collection=${collectionId}`);
   return { name: details.name };
 }
 
 export async function removeGameFromCollection(
   supabase: SupabaseClient,
-  userId: string,
+  collectionId: string,
   bggId: number
 ): Promise<void> {
   const { error } = await supabase
     .from("collection_items")
     .delete()
-    .eq("user_id", userId)
+    .eq("collection_id", collectionId)
     .eq("bgg_id", bggId);
   if (error) throw new Error(`Не удалось удалить: ${error.message}`);
 }
 
 export async function updateGameTags(
   supabase: SupabaseClient,
-  userId: string,
+  collectionId: string,
   bggId: number,
   tags: string[]
 ): Promise<void> {
   const { error } = await supabase
     .from("collection_items")
     .update({ tags })
-    .eq("user_id", userId)
+    .eq("collection_id", collectionId)
     .eq("bgg_id", bggId);
   if (error) throw new Error(`Не удалось обновить теги: ${error.message}`);
 }
 
-/** Обновляет личные данные записи коллекции (теги и/или заметку). */
+/** Обновляет данные записи коллекции (теги и/или заметку). */
 export async function updateCollectionItem(
   supabase: SupabaseClient,
-  userId: string,
+  collectionId: string,
   bggId: number,
   fields: { tags?: string[]; notes?: string | null }
 ): Promise<void> {
@@ -150,7 +158,7 @@ export async function updateCollectionItem(
   const { error } = await supabase
     .from("collection_items")
     .update(patch)
-    .eq("user_id", userId)
+    .eq("collection_id", collectionId)
     .eq("bgg_id", bggId);
   if (error) throw new Error(`Не удалось сохранить: ${error.message}`);
 }
@@ -176,16 +184,16 @@ export async function updateGameInfo(
   if (error) throw new Error(`Не удалось обновить игру: ${error.message}`);
 }
 
-/** Одна игра из коллекции пользователя по bggId (для страницы игры). */
+/** Одна игра из коллекции по bggId (для страницы игры). */
 export async function getCollectionGame(
   supabase: SupabaseClient,
-  userId: string,
+  collectionId: string,
   bggId: number
 ): Promise<CollectionGame | null> {
   const { data, error } = await supabase
     .from("collection_items")
-    .select("id, bgg_id, tags, notes, added_at, games(*)")
-    .eq("user_id", userId)
+    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
+    .eq("collection_id", collectionId)
     .eq("bgg_id", bggId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -195,12 +203,26 @@ export async function getCollectionGame(
 
 export async function listCollection(
   supabase: SupabaseClient,
-  userId: string
+  collectionId: string
 ): Promise<CollectionGame[]> {
   const { data, error } = await supabase
     .from("collection_items")
-    .select("id, bgg_id, tags, notes, added_at, games(*)")
-    .eq("user_id", userId)
+    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
+    .eq("collection_id", collectionId)
+    .order("added_at", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+}
+
+/** Все игры из всех доступных пользователю коллекций (сводный вид «Все игры»).
+ *  RLS отдаёт только доступные строки. Имя коллекции приходит из joined-select. */
+export async function listAllGames(
+  supabase: SupabaseClient
+): Promise<CollectionGame[]> {
+  const { data, error } = await supabase
+    .from("collection_items")
+    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*), collections(name)")
     .order("added_at", { ascending: false });
   if (error) throw new Error(error.message);
 

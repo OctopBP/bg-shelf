@@ -12,6 +12,8 @@ const MODEL = "claude-opus-4-8";
 
 const SYSTEM_PROMPT = `Ты — ассистент для управления коллекцией настольных игр. Пользователь даёт команды голосом или текстом, чаще всего на русском.
 
+Ты работаешь с одной выбранной коллекцией пользователя — все добавления, удаления и изменения тегов относятся к ней.
+
 Твоя задача — выполнить команду пользователя с помощью инструментов:
 - Названия игр пользователь может произносить по-русски ("каркасон", "манчкин", "колонизаторы"). В BGG игры хранятся под оригинальными (обычно английскими) названиями — сначала ищи по оригинальному названию ("Carcassonne", "Munchkin", "Catan"). Если не уверен в оригинальном названии, попробуй несколько вариантов поиска.
 - При выборе из результатов поиска предпочитай базовую игру, а не дополнения и переиздания, если пользователь явно не просил иное.
@@ -103,6 +105,7 @@ export interface AgentResult {
 export async function runCollectionAgent(
   command: string,
   supabase: SupabaseClient,
+  collectionId: string,
   userId: string,
   reqId = "????????"
 ): Promise<AgentResult> {
@@ -132,9 +135,10 @@ export async function runCollectionAgent(
           : [];
         const { name: gameName } = await addGameToCollection(
           supabase,
-          userId,
+          collectionId,
           Number(input.bgg_id),
-          tags
+          tags,
+          userId
         );
         changed = true;
         return `Игра "${gameName}" добавлена в коллекцию${
@@ -142,18 +146,18 @@ export async function runCollectionAgent(
         }`;
       }
       case "remove_from_collection": {
-        await removeGameFromCollection(supabase, userId, Number(input.bgg_id));
+        await removeGameFromCollection(supabase, collectionId, Number(input.bgg_id));
         changed = true;
         return "Игра удалена из коллекции";
       }
       case "set_tags": {
         const tags = (input.tags as string[]).map((t) => t.toLowerCase());
-        await updateGameTags(supabase, userId, Number(input.bgg_id), tags);
+        await updateGameTags(supabase, collectionId, Number(input.bgg_id), tags);
         changed = true;
         return `Теги обновлены: ${tags.join(", ")}`;
       }
       case "list_collection": {
-        const items = await listCollection(supabase, userId);
+        const items = await listCollection(supabase, collectionId);
         return JSON.stringify(
           items.map((i) => ({ bgg_id: i.bggId, name: i.name, tags: i.tags }))
         );

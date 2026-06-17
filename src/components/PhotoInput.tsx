@@ -23,6 +23,7 @@ interface Selection {
 }
 
 interface PhotoInputProps {
+  collectionId: string;
   onAdded: () => void;
   onStatus: (message: string) => void;
 }
@@ -33,7 +34,7 @@ const CONFIDENCE_LABEL: Record<PhotoMatch["confidence"], string> = {
   low: "не уверен",
 };
 
-export default function PhotoInput({ onAdded, onStatus }: PhotoInputProps) {
+export default function PhotoInput({ collectionId, onAdded, onStatus }: PhotoInputProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -95,7 +96,7 @@ export default function PhotoInput({ onAdded, onStatus }: PhotoInputProps) {
       const res = await fetch("/api/collection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify({ collectionId, items }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Ошибка добавления");
