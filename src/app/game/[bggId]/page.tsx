@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCollectionGame } from "@/lib/collection";
+import { UNCOLLECTED } from "@/lib/collections";
 import GameDetail from "@/components/GameDetail";
 
 export default async function GamePage({
@@ -21,18 +22,21 @@ export default async function GamePage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const game = await getCollectionGame(supabase, collectionId, id);
+  const game = await getCollectionGame(supabase, collectionId, id, user.id);
   if (!game) notFound();
 
-  // Роль текущего пользователя в этой коллекции определяет права на правки.
-  const { data: membership } = await supabase
-    .from("collection_members")
-    .select("role")
-    .eq("collection_id", collectionId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  const canEdit =
-    membership?.role === "owner" || membership?.role === "editor";
+  // «Без коллекции» — личные игры пользователя, всегда редактируемые. Иначе
+  // права определяет роль в коллекции.
+  let canEdit = collectionId === UNCOLLECTED;
+  if (!canEdit) {
+    const { data: membership } = await supabase
+      .from("collection_members")
+      .select("role")
+      .eq("collection_id", collectionId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    canEdit = membership?.role === "owner" || membership?.role === "editor";
+  }
 
   return (
     <main className="min-h-screen">

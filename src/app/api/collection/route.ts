@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     if (!collectionId) {
       return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
     }
-    const games = await listCollection(supabase, collectionId);
+    const games = await listCollection(supabase, collectionId, user.id);
     return NextResponse.json({ games });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -102,7 +102,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await removeGameFromCollection(supabase, collectionId, bggId);
+    await removeGameFromCollection(supabase, collectionId, bggId, user.id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -150,7 +150,7 @@ export async function PATCH(request: Request) {
       await updateCollectionItem(supabase, collectionId, bggId, {
         tags,
         notes: notes === undefined ? undefined : notes || null,
-      });
+      }, user.id);
     }
     if (info) {
       await updateGameInfo(supabase, bggId, info);

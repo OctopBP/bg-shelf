@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getBggGameDetails } from "./bgg";
+import { UNCOLLECTED } from "./collections";
 
 export interface CollectionGame {
   id: string;
@@ -43,7 +44,9 @@ function mapRow(row: Record<string, unknown>): CollectionGame {
   const collection = row.collections as Record<string, unknown> | undefined;
   return {
     id: row.id as string,
-    collectionId: row.collection_id as string,
+    // orphan-записи (collection_id = null) отдаём под псевдо-id «без коллекции»,
+    // чтобы клиентские ссылки/удаление работали единообразно.
+    collectionId: (row.collection_id as string | null) ?? UNCOLLECTED,
     ...(collection ? { collectionName: collection.name as string } : {}),
     bggId: row.bgg_id as number,
     name: game.name as string,
@@ -65,13 +68,14 @@ function mapRow(row: Record<string, unknown>): CollectionGame {
   };
 }
 
-/** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию. */
+/** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию.
+ *  collectionId === UNCOLLECTED → добавляет в «Без коллекции» (нужен userId). */
 export async function addGameToCollection(
   supabase: SupabaseClient,
   collectionId: string,
   bggId: number,
   tags: string[] = [],
-  addedBy?: string
+  userId?: string
 ): Promise<{ name: string }> {
   console.log(`[collection] addGameToCollection collection=${collectionId} bggId=${bggId}, tags=[${tags.join(", ")}]`);
   const details = await getBggGameDetails(bggId);
@@ -103,10 +107,19 @@ export async function addGameToCollection(
     throw new Error(`Не удалось сохранить игру: ${gameError.message}`);
   }
 
-  const { error: itemError } = await supabase.from("collection_items").upsert(
-    { collection_id: collectionId, bgg_id: bggId, tags, added_by: addedBy ?? null },
-    { onConflict: "collection_id,bgg_id" }
-  );
+  const orphan = collectionId === UNCOLLECTED;
+  if (orphan && !userId) {
+    throw new Error("Для «Без коллекции» нужен пользователь");
+  }
+  const { error: itemError } = orphan
+    ? await supabase.from("collection_items").upsert(
+        { collection_id: null, owner_id: userId, bgg_id: bggId, tags },
+        { onConflict: "owner_id,bgg_id" }
+      )
+    : await supabase.from("collection_items").upsert(
+        { collection_id: collectionId, bgg_id: bggId, tags, added_by: userId ?? null },
+        { onConflict: "collection_id,bgg_id" }
+      );
   if (itemError) {
     console.error(`[collection] upsert collection_items упал:`, itemError);
     throw new Error(`Не удалось добавить в коллекцию: ${itemError.message}`);
@@ -116,16 +129,23 @@ export async function addGameToCollection(
   return { name: details.name };
 }
 
+/** true → цель это «Без коллекции» (orphan). Бросает, если не передан userId. */
+function isOrphanTarget(collectionId: string, userId?: string): boolean {
+  if (collectionId !== UNCOLLECTED) return false;
+  if (!userId) throw new Error("Для «Без коллекции» нужен пользователь");
+  return true;
+}
+
 export async function removeGameFromCollection(
   supabase: SupabaseClient,
   collectionId: string,
-  bggId: number
+  bggId: number,
+  userId?: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from("collection_items")
-    .delete()
-    .eq("collection_id", collectionId)
-    .eq("bgg_id", bggId);
+  const q = supabase.from("collection_items").delete().eq("bgg_id", bggId);
+  const { error } = await (isOrphanTarget(collectionId, userId)
+    ? q.is("collection_id", null).eq("owner_id", userId!)
+    : q.eq("collection_id", collectionId));
   if (error) throw new Error(`Не удалось удалить: ${error.message}`);
 }
 
@@ -133,13 +153,13 @@ export async function updateGameTags(
   supabase: SupabaseClient,
   collectionId: string,
   bggId: number,
-  tags: string[]
+  tags: string[],
+  userId?: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from("collection_items")
-    .update({ tags })
-    .eq("collection_id", collectionId)
-    .eq("bgg_id", bggId);
+  const q = supabase.from("collection_items").update({ tags }).eq("bgg_id", bggId);
+  const { error } = await (isOrphanTarget(collectionId, userId)
+    ? q.is("collection_id", null).eq("owner_id", userId!)
+    : q.eq("collection_id", collectionId));
   if (error) throw new Error(`Не удалось обновить теги: ${error.message}`);
 }
 
@@ -148,18 +168,18 @@ export async function updateCollectionItem(
   supabase: SupabaseClient,
   collectionId: string,
   bggId: number,
-  fields: { tags?: string[]; notes?: string | null }
+  fields: { tags?: string[]; notes?: string | null },
+  userId?: string
 ): Promise<void> {
   const patch: Record<string, unknown> = {};
   if (fields.tags !== undefined) patch.tags = fields.tags;
   if (fields.notes !== undefined) patch.notes = fields.notes;
   if (Object.keys(patch).length === 0) return;
 
-  const { error } = await supabase
-    .from("collection_items")
-    .update(patch)
-    .eq("collection_id", collectionId)
-    .eq("bgg_id", bggId);
+  const q = supabase.from("collection_items").update(patch).eq("bgg_id", bggId);
+  const { error } = await (isOrphanTarget(collectionId, userId)
+    ? q.is("collection_id", null).eq("owner_id", userId!)
+    : q.eq("collection_id", collectionId));
   if (error) throw new Error(`Не удалось сохранить: ${error.message}`);
 }
 
@@ -188,14 +208,17 @@ export async function updateGameInfo(
 export async function getCollectionGame(
   supabase: SupabaseClient,
   collectionId: string,
-  bggId: number
+  bggId: number,
+  userId?: string
 ): Promise<CollectionGame | null> {
-  const { data, error } = await supabase
+  const q = supabase
     .from("collection_items")
     .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
-    .eq("collection_id", collectionId)
-    .eq("bgg_id", bggId)
-    .maybeSingle();
+    .eq("bgg_id", bggId);
+  const { data, error } = await (isOrphanTarget(collectionId, userId)
+    ? q.is("collection_id", null).eq("owner_id", userId!)
+    : q.eq("collection_id", collectionId)
+  ).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
   return mapRow(data as Record<string, unknown>);
@@ -203,13 +226,16 @@ export async function getCollectionGame(
 
 export async function listCollection(
   supabase: SupabaseClient,
-  collectionId: string
+  collectionId: string,
+  userId?: string
 ): Promise<CollectionGame[]> {
-  const { data, error } = await supabase
+  const q = supabase
     .from("collection_items")
-    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
-    .eq("collection_id", collectionId)
-    .order("added_at", { ascending: false });
+    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)");
+  const { data, error } = await (isOrphanTarget(collectionId, userId)
+    ? q.is("collection_id", null).eq("owner_id", userId!)
+    : q.eq("collection_id", collectionId)
+  ).order("added_at", { ascending: false });
   if (error) throw new Error(error.message);
 
   return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));

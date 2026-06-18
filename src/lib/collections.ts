@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** Псевдо-id виртуальной коллекции «Без коллекции» (игры без collection_id). */
+export const UNCOLLECTED = "uncollected";
+
 export type CollectionRole = "owner" | "editor" | "viewer";
 
 export interface CollectionSummary {
@@ -63,6 +66,62 @@ export async function listCollections(
       } satisfies CollectionSummary;
     })
     .filter((c): c is CollectionSummary => c !== null);
+}
+
+/**
+ * Коллекции, которыми владеет указанный пользователь. Для страницы друга:
+ * RLS-политика «friends can read collection» отдаёт строки только если между
+ * текущим пользователем и owner есть принятая дружба.
+ */
+export async function listCollectionsByOwner(
+  supabase: SupabaseClient,
+  ownerId: string
+): Promise<CollectionSummary[]> {
+  const { data, error } = await supabase
+    .from("collections")
+    .select("id, name, owner_id, created_at")
+    .eq("owner_id", ownerId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const collections = (data ?? []) as {
+    id: string;
+    name: string;
+    owner_id: string;
+  }[];
+  if (collections.length === 0) return [];
+
+  const ids = collections.map((c) => c.id);
+  const counts = new Map<string, number>();
+  const { data: items, error: countErr } = await supabase
+    .from("collection_items")
+    .select("collection_id")
+    .in("collection_id", ids);
+  if (countErr) throw new Error(countErr.message);
+  for (const it of items ?? []) {
+    const cid = (it as { collection_id: string }).collection_id;
+    counts.set(cid, (counts.get(cid) ?? 0) + 1);
+  }
+
+  return collections.map((c) => ({
+    id: c.id,
+    name: c.name,
+    ownerId: c.owner_id,
+    role: "viewer" as const,
+    gameCount: counts.get(c.id) ?? 0,
+  }));
+}
+
+/** Сколько у пользователя игр «без коллекции» (RLS ограничивает своими). */
+export async function countUncollected(
+  supabase: SupabaseClient
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("collection_items")
+    .select("id")
+    .is("collection_id", null);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length;
 }
 
 export async function createCollection(

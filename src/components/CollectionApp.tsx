@@ -19,7 +19,7 @@ import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
 import ShareDialog from "./ShareDialog";
 import { colorAt, colorForKey } from "@/lib/palette";
-import type { CollectionRole, CollectionSummary } from "@/lib/collections";
+import { UNCOLLECTED, type CollectionRole, type CollectionSummary } from "@/lib/collections";
 
 interface CollectionGame {
   id: string;
@@ -40,6 +40,7 @@ const ALL = "all";
 
 export default function CollectionApp() {
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
+  const [uncollectedCount, setUncollectedCount] = useState(0);
   const [userId, setUserId] = useState("");
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string>(ALL);
@@ -53,22 +54,28 @@ export default function CollectionApp() {
   const [sharing, setSharing] = useState(false);
 
   const isAllView = activeId === ALL;
+  const isUncollected = activeId === UNCOLLECTED;
   const activeCollection = collections.find((c) => c.id === activeId);
   const role: CollectionRole | undefined = activeCollection?.role;
-  const canEdit = role === "owner" || role === "editor";
+  // «Без коллекции» — личные игры пользователя, всегда редактируемые.
+  const canEdit = isUncollected || role === "owner" || role === "editor";
   const isOwner = role === "owner";
 
   const loadCollections = useCallback(async (selectId?: string) => {
     const res = await fetch("/api/collections");
-    const data = res.ok ? await res.json() : { collections: [], userId: "" };
+    const data = res.ok
+      ? await res.json()
+      : { collections: [], uncollectedCount: 0, userId: "" };
     const list = (data.collections as CollectionSummary[]) ?? [];
     setCollections(list);
+    setUncollectedCount(data.uncollectedCount ?? 0);
     setUserId(data.userId ?? "");
     setCollectionsLoaded(true);
     setActiveId((prev) => {
       if (selectId) return selectId;
-      if (prev !== ALL && list.some((c) => c.id === prev)) return prev;
-      return list[0]?.id ?? ALL;
+      if (prev === ALL || prev === UNCOLLECTED) return prev;
+      if (list.some((c) => c.id === prev)) return prev;
+      return list[0]?.id ?? UNCOLLECTED;
     });
   }, []);
 
@@ -208,6 +215,19 @@ export default function CollectionApp() {
         })}
         {collectionsLoaded && (
           <button
+            onClick={() => setActiveId(UNCOLLECTED)}
+            style={
+              isUncollected
+                ? { backgroundColor: "#fff", borderColor: "#fff", color: "#0d0d0d" }
+                : { borderColor: "#fff", color: "#fff" }
+            }
+            className="rounded-full border-[3px] border-dashed px-3.5 py-1.5 text-sm font-bold transition"
+          >
+            Без коллекции · {uncollectedCount}
+          </button>
+        )}
+        {collectionsLoaded && (
+          <button
             onClick={() => setActiveId(ALL)}
             style={
               isAllView
@@ -256,6 +276,12 @@ export default function CollectionApp() {
             </span>
           )}
         </div>
+      )}
+
+      {isUncollected && (
+        <p className="text-sm text-muted">
+          Игры, не добавленные ни в одну коллекцию.
+        </p>
       )}
 
       {/* Панель команд — только когда есть права на изменение */}
@@ -360,9 +386,11 @@ export default function CollectionApp() {
           </div>
           <p className="font-medium text-ink/70">
             {games.length === 0
-              ? canEdit
-                ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
-                : "В этой коллекции пока нет игр."
+              ? isUncollected
+                ? "Здесь появятся игры, не добавленные ни в одну коллекцию."
+                : canEdit
+                  ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
+                  : "В этой коллекции пока нет игр."
               : "Нет игр с этим тегом."}
           </p>
         </div>
@@ -416,9 +444,10 @@ export default function CollectionApp() {
                     ""
                   )}
                 </p>
-                {isAllView && game.collectionName && (
+                {isAllView && (
                   <p className="mt-1 truncate text-xs font-semibold text-brand">
-                    {game.collectionName}
+                    {game.collectionName ??
+                      (game.collectionId === UNCOLLECTED ? "Без коллекции" : "")}
                   </p>
                 )}
                 {game.tags.length > 0 && (
