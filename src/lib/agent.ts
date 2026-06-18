@@ -114,7 +114,14 @@ export async function runCollectionAgent(
     console.error(`[agent ${reqId}]`, ...args);
 
   log(`старт, модель=${MODEL}, API key задан=${!!process.env.ANTHROPIC_API_KEY}`);
-  const anthropic = new Anthropic();
+  // baseURL берётся из ANTHROPIC_BASE_URL автоматически. Если он указывает на
+  // наш Cloudflare-релей, добавляем секрет, по которому релей пускает запросы.
+  const relaySecret = process.env.ANTHROPIC_RELAY_SECRET;
+  const anthropic = new Anthropic(
+    relaySecret
+      ? { defaultHeaders: { "x-relay-secret": relaySecret } }
+      : undefined
+  );
   let changed = false;
 
   async function executeTool(
