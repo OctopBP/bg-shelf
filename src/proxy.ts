@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { publicOrigin } from "@/lib/public-url";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -37,15 +38,11 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user && !isPublicRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL("/login", publicOrigin(request)));
   }
 
   if (user && isLoginRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL("/", publicOrigin(request)));
   }
 
   return supabaseResponse;

@@ -1,6 +1,7 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { publicOrigin } from "@/lib/public-url";
 
 // Точка приземления для ссылок из писем Supabase (invite / recovery).
 // Шаблон письма должен вести сюда:
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest) {
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
   const next = searchParams.get("next") ?? "/auth/set-password";
+  const origin = publicOrigin(request);
 
   if (tokenHash && type) {
     const supabase = await createClient();
@@ -20,9 +22,14 @@ export async function GET(request: NextRequest) {
       token_hash: tokenHash,
     });
     if (!error) {
-      return NextResponse.redirect(new URL(next, request.url));
+      return NextResponse.redirect(new URL(next, origin));
     }
+    // Видно в логах Dokploy — помогает понять, почему ссылка не сработала
+    // (истёк / уже использован токен и т.п.).
+    console.error("verifyOtp failed:", error.message);
+  } else {
+    console.error("confirm: missing token_hash or type", { tokenHash, type });
   }
 
-  return NextResponse.redirect(new URL("/login?error=invalid_link", request.url));
+  return NextResponse.redirect(new URL("/login?error=invalid_link", origin));
 }
