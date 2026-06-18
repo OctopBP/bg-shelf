@@ -13,14 +13,27 @@ import {
   updateGame,
   selectItems,
   selectAllItems,
+  selectUncollected,
+  deleteUncollected,
+  updateUncollectedFields,
   selectMemberships,
   selectItemCollectionIds,
+  selectItemCollectionIdsIn,
   createCollection,
   renameCollection,
   deleteCollection,
   memberEmails,
   shareCollection,
   removeMember,
+  getUsername,
+  setUsername,
+  profilesByIds,
+  profileByUsername,
+  listFriendships,
+  insertFriendship,
+  acceptFriendship,
+  deleteFriendship,
+  collectionsByOwner,
   type GameRecord,
   type Role,
 } from "@/lib/mock/store";
@@ -117,21 +130,41 @@ const PGRST116 = HttpResponse.json(
 );
 
 const restHandlers = [
-  // collection_items: одна коллекция (?collection_id=eq…), все игры (embed
-  // collections(name)) или просто список collection_id для счётчиков.
+  // collection_items: одна коллекция (?collection_id=eq…), «без коллекции»
+  // (?collection_id=is.null), все игры (embed collections) или список
+  // collection_id для счётчиков.
   http.get("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
     const select = url.searchParams.get("select") ?? "";
-    const collectionId = eqValue(url, "collection_id");
+    const orphan = url.searchParams.get("collection_id") === "is.null";
+    const collectionIdRaw = url.searchParams.get("collection_id");
+    const inList = collectionIdRaw?.startsWith("in.(")
+      ? collectionIdRaw
+          .slice(4, -1)
+          .split(",")
+          .map((s) => s.replace(/^"|"$/g, ""))
+      : null;
+    const collectionId = orphan || inList ? undefined : eqValue(url, "collection_id");
+    const ownerId = eqValue(url, "owner_id") ?? DEMO_USER.id;
     const bggId = eqValue(url, "bgg_id");
 
-    // select=collection_id (без embed games) — запрос для подсчёта игр
+    // select без embed games — запрос для подсчёта (коллекций или orphan-игр)
     if (!select.includes("games")) {
+      if (orphan) {
+        return HttpResponse.json(
+          selectUncollected(ownerId).map((r) => ({ id: r.id }))
+        );
+      }
+      // Счётчики игр для коллекций друга (?collection_id=in.(…)).
+      if (inList) {
+        return HttpResponse.json(selectItemCollectionIdsIn(inList));
+      }
       return HttpResponse.json(selectItemCollectionIds(DEMO_USER.id));
     }
 
-    let rows =
-      collectionId !== undefined
+    let rows = orphan
+      ? selectUncollected(ownerId)
+      : collectionId !== undefined
         ? selectItems(collectionId)
         : selectAllItems(DEMO_USER.id);
     if (bggId !== undefined) {
@@ -144,18 +177,20 @@ const restHandlers = [
     return HttpResponse.json(rows);
   }),
 
-  // upsert collection_items (one object or an array)
+  // upsert collection_items (one object or an array). collection_id = null →
+  // orphan-запись, владелец берётся из owner_id.
   http.post("*/rest/v1/collection_items", async ({ request }) => {
     const body = await request.json();
     const rows = (Array.isArray(body) ? body : [body]) as Array<
       Record<string, unknown>
     >;
     for (const row of rows) {
+      const cid = (row.collection_id as string | null) ?? null;
       upsertItem(
-        String(row.collection_id),
+        cid,
         Number(row.bgg_id),
         (row.tags as string[]) ?? [],
-        (row.added_by as string | null) ?? null
+        (cid === null ? row.owner_id : row.added_by) as string | null
       );
     }
     return HttpResponse.json([], { status: 201 });
@@ -163,7 +198,12 @@ const restHandlers = [
 
   http.delete("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
-    deleteItem(String(eqValue(url, "collection_id")), Number(eqValue(url, "bgg_id")));
+    const bggId = Number(eqValue(url, "bgg_id"));
+    if (url.searchParams.get("collection_id") === "is.null") {
+      deleteUncollected(eqValue(url, "owner_id") ?? DEMO_USER.id, bggId);
+    } else {
+      deleteItem(String(eqValue(url, "collection_id")), bggId);
+    }
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -173,14 +213,16 @@ const restHandlers = [
       tags?: string[];
       notes?: string | null;
     };
-    updateItemFields(
-      String(eqValue(url, "collection_id")),
-      Number(eqValue(url, "bgg_id")),
-      {
-        ...(body.tags !== undefined ? { tags: body.tags } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes } : {}),
-      }
-    );
+    const patch = {
+      ...(body.tags !== undefined ? { tags: body.tags } : {}),
+      ...(body.notes !== undefined ? { notes: body.notes } : {}),
+    };
+    const bggId = Number(eqValue(url, "bgg_id"));
+    if (url.searchParams.get("collection_id") === "is.null") {
+      updateUncollectedFields(eqValue(url, "owner_id") ?? DEMO_USER.id, bggId, patch);
+    } else {
+      updateItemFields(String(eqValue(url, "collection_id")), bggId, patch);
+    }
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -263,6 +305,117 @@ const restHandlers = [
   http.post("*/rest/v1/rpc/collection_member_emails", async ({ request }) => {
     const body = (await request.json()) as { cid: string };
     return HttpResponse.json(memberEmails(body.cid));
+  }),
+
+  // --- Друзья --------------------------------------------------------------
+  // profiles: свой ник (?id=eq…), поиск по нику (?username=eq…) или ники по
+  // списку id (?id=in.(…)).
+  http.get("*/rest/v1/profiles", ({ request }) => {
+    const url = new URL(request.url);
+    const idRaw = url.searchParams.get("id");
+    const username = eqValue(url, "username");
+
+    let rows: { id: string; username: string }[];
+    if (username) {
+      const p = profileByUsername(username);
+      rows = p ? [p] : [];
+    } else if (idRaw?.startsWith("in.(")) {
+      const ids = idRaw
+        .slice(4, -1)
+        .split(",")
+        .map((s) => s.replace(/^"|"$/g, ""));
+      rows = profilesByIds(ids);
+    } else if (idRaw?.startsWith("eq.")) {
+      const id = idRaw.slice(3);
+      const name = getUsername(id);
+      rows = name ? [{ id, username: name }] : [];
+    } else {
+      rows = [];
+    }
+
+    if (wantsObject(request)) {
+      return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
+    }
+    return HttpResponse.json(rows);
+  }),
+
+  http.patch("*/rest/v1/profiles", async ({ request }) => {
+    const url = new URL(request.url);
+    const body = (await request.json()) as { username?: string };
+    const id = eqValue(url, "id") ?? DEMO_USER.id;
+    const res = setUsername(id, body.username ?? "");
+    if (res === "taken") {
+      return HttpResponse.json(
+        { code: "23505", message: "duplicate key value violates unique constraint" },
+        { status: 409 }
+      );
+    }
+    if (res === "invalid") {
+      return HttpResponse.json(
+        { code: "23514", message: "violates check constraint" },
+        { status: 400 }
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // friendships: список своих (RLS-фильтр по demo), поиск пары (?or=…),
+  // вставка запроса, принятие (patch) и удаление.
+  http.get("*/rest/v1/friendships", ({ request }) => {
+    const url = new URL(request.url);
+    const orParam = url.searchParams.get("or");
+    const status = eqValue(url, "status");
+
+    let rows = listFriendships(DEMO_USER.id);
+    if (orParam) {
+      const ids = [...orParam.matchAll(/eq\.([^,)]+)/g)].map((m) => m[1]);
+      const others = new Set(ids.filter((i) => i !== DEMO_USER.id));
+      rows = rows.filter((r) => {
+        const other =
+          r.requester_id === DEMO_USER.id ? r.addressee_id : r.requester_id;
+        return others.has(other);
+      });
+    }
+    if (status) rows = rows.filter((r) => r.status === status);
+
+    const out = rows.map((r) => ({
+      id: r.id,
+      requester_id: r.requester_id,
+      addressee_id: r.addressee_id,
+      status: r.status,
+    }));
+    if (wantsObject(request)) {
+      return out.length === 1 ? HttpResponse.json(out[0]) : PGRST116;
+    }
+    return HttpResponse.json(out);
+  }),
+
+  http.post("*/rest/v1/friendships", async ({ request }) => {
+    const body = (await request.json()) as {
+      requester_id: string;
+      addressee_id: string;
+    };
+    insertFriendship(body.requester_id, body.addressee_id);
+    return HttpResponse.json([], { status: 201 });
+  }),
+
+  http.patch("*/rest/v1/friendships", ({ request }) => {
+    const url = new URL(request.url);
+    acceptFriendship(String(eqValue(url, "id")));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/rest/v1/friendships", ({ request }) => {
+    const url = new URL(request.url);
+    deleteFriendship(String(eqValue(url, "id")));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // collections: коллекции друга (?owner_id=eq…) для страницы друга.
+  http.get("*/rest/v1/collections", ({ request }) => {
+    const url = new URL(request.url);
+    const ownerId = eqValue(url, "owner_id");
+    return HttpResponse.json(ownerId ? collectionsByOwner(ownerId) : []);
   }),
 
   // upsert games cache (one object or an array)

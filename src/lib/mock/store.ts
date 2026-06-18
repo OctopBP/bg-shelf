@@ -40,7 +40,9 @@ interface MemberRecord {
 
 export interface ItemRecord {
   id: string;
-  collection_id: string;
+  /** null → игра «без коллекции», принадлежит owner_id. */
+  collection_id: string | null;
+  owner_id: string | null;
   bgg_id: number;
   tags: string[];
   notes: string | null;
@@ -51,7 +53,7 @@ export interface ItemRecord {
 /** Row shape returned by the joined select, matching the real query. */
 export interface ItemRow {
   id: string;
-  collection_id: string;
+  collection_id: string | null;
   bgg_id: number;
   tags: string[];
   notes: string | null;
@@ -60,10 +62,21 @@ export interface ItemRow {
   collections?: { name: string } | null;
 }
 
+interface FriendshipRecord {
+  id: string;
+  requester_id: string;
+  addressee_id: string;
+  status: "pending" | "accepted";
+  created_at: string;
+}
+
 const games = new Map<number, GameRecord>();
 const collections: CollectionRecord[] = [];
 const members: MemberRecord[] = [];
 const items: ItemRecord[] = [];
+/** userId → ник. */
+const profiles = new Map<string, string>();
+const friendships: FriendshipRecord[] = [];
 
 const EMAILS: Record<string, string> = {
   [DEMO_USER.id]: DEMO_USER.email,
@@ -72,6 +85,7 @@ const EMAILS: Record<string, string> = {
 
 const SHELF_ID = "col-shelf";
 const WISHLIST_ID = "col-wishlist";
+const FRIEND_COLLECTION_ID = "col-friend";
 
 function toGameRecord(g: (typeof MOCK_GAMES)[number]): GameRecord {
   return {
@@ -133,12 +147,65 @@ function seed() {
     items.push({
       id: crypto.randomUUID(),
       collection_id: SHELF_ID,
+      owner_id: null,
       bgg_id: bggId,
       tags,
       notes: null,
       added_at: new Date(now - i * 60_000).toISOString(),
       added_by: DEMO_USER.id,
     });
+  });
+  // Одна игра «без коллекции» у демо-пользователя — для вкладки «Без коллекции».
+  items.push({
+    id: crypto.randomUUID(),
+    collection_id: null,
+    owner_id: DEMO_USER.id,
+    bgg_id: 199792,
+    tags: ["хочу попробовать"],
+    notes: null,
+    added_at: new Date(now - 30_000).toISOString(),
+    added_by: DEMO_USER.id,
+  });
+
+  // --- Друзья (demo) -------------------------------------------------------
+  // Ники для обоих демо-аккаунтов (совпадают с локальной частью email).
+  profiles.set(DEMO_USER.id, "demo");
+  profiles.set(FRIEND_USER.id, "friend");
+
+  // У друга — своя коллекция с парой игр (видна demo-пользователю после
+  // принятия дружбы).
+  collections.push({
+    id: FRIEND_COLLECTION_ID,
+    owner_id: FRIEND_USER.id,
+    name: "Коллекция друга",
+    created_at: new Date(now - 5 * 86_400_000).toISOString(),
+  });
+  members.push({
+    collection_id: FRIEND_COLLECTION_ID,
+    user_id: FRIEND_USER.id,
+    role: "owner",
+  });
+  [266192, 822, 30549, 1927].forEach((bggId, i) => {
+    items.push({
+      id: crypto.randomUUID(),
+      collection_id: FRIEND_COLLECTION_ID,
+      owner_id: null,
+      bgg_id: bggId,
+      tags: [],
+      notes: null,
+      added_at: new Date(now - i * 60_000).toISOString(),
+      added_by: FRIEND_USER.id,
+    });
+  });
+
+  // Входящий запрос в друзья: друг (@friend) → demo. Demo может принять и
+  // открыть коллекцию друга.
+  friendships.push({
+    id: crypto.randomUUID(),
+    requester_id: FRIEND_USER.id,
+    addressee_id: DEMO_USER.id,
+    status: "pending",
+    created_at: new Date(now - 3_600_000).toISOString(),
   });
 }
 
@@ -156,14 +223,19 @@ export function updateGame(bggId: number, fields: Partial<GameRecord>): void {
 
 // --- Collection items ------------------------------------------------------
 export function upsertItem(
-  collectionId: string,
+  collectionId: string | null,
   bggId: number,
   tags: string[],
-  addedBy?: string | null
+  ownerOrAddedBy?: string | null
 ): void {
   seed();
-  const existing = items.find(
-    (i) => i.collection_id === collectionId && i.bgg_id === bggId
+  // orphan ищем по (owner_id, bgg_id), записи коллекций — по (collection_id, bgg_id)
+  const existing = items.find((i) =>
+    collectionId === null
+      ? i.collection_id === null &&
+        i.owner_id === ownerOrAddedBy &&
+        i.bgg_id === bggId
+      : i.collection_id === collectionId && i.bgg_id === bggId
   );
   if (existing) {
     existing.tags = tags;
@@ -172,11 +244,12 @@ export function upsertItem(
   items.push({
     id: crypto.randomUUID(),
     collection_id: collectionId,
+    owner_id: collectionId === null ? (ownerOrAddedBy ?? null) : null,
     bgg_id: bggId,
     tags,
     notes: null,
     added_at: new Date().toISOString(),
-    added_by: addedBy ?? null,
+    added_by: collectionId === null ? null : (ownerOrAddedBy ?? null),
   });
 }
 
@@ -202,6 +275,43 @@ export function updateItemFields(
   if (fields.notes !== undefined) item.notes = fields.notes;
 }
 
+// --- «Без коллекции» (orphan-записи) --------------------------------------
+export function selectUncollected(ownerId: string): ItemRow[] {
+  seed();
+  return items
+    .filter((i) => i.collection_id === null && i.owner_id === ownerId)
+    .sort((a, b) => b.added_at.localeCompare(a.added_at))
+    .map((i) => toRow(i, false));
+}
+
+export function deleteUncollected(ownerId: string, bggId: number): void {
+  seed();
+  const idx = items.findIndex(
+    (i) => i.collection_id === null && i.owner_id === ownerId && i.bgg_id === bggId
+  );
+  if (idx !== -1) items.splice(idx, 1);
+}
+
+export function updateUncollectedFields(
+  ownerId: string,
+  bggId: number,
+  fields: { tags?: string[]; notes?: string | null }
+): void {
+  seed();
+  const item = items.find(
+    (i) => i.collection_id === null && i.owner_id === ownerId && i.bgg_id === bggId
+  );
+  if (!item) return;
+  if (fields.tags !== undefined) item.tags = fields.tags;
+  if (fields.notes !== undefined) item.notes = fields.notes;
+}
+
+export function countUncollected(ownerId: string): number {
+  seed();
+  return items.filter((i) => i.collection_id === null && i.owner_id === ownerId)
+    .length;
+}
+
 function toRow(i: ItemRecord, withCollection: boolean): ItemRow {
   return {
     id: i.id,
@@ -211,8 +321,15 @@ function toRow(i: ItemRecord, withCollection: boolean): ItemRow {
     notes: i.notes,
     added_at: i.added_at,
     games: games.get(i.bgg_id) ?? null,
+    // orphan-записи (collection_id = null) отдают embed collections как null,
+    // как настоящий PostgREST.
     ...(withCollection
-      ? { collections: { name: collections.find((c) => c.id === i.collection_id)?.name ?? "" } }
+      ? {
+          collections:
+            i.collection_id === null
+              ? null
+              : { name: collections.find((c) => c.id === i.collection_id)?.name ?? "" },
+        }
       : {}),
   };
 }
@@ -226,14 +343,18 @@ export function selectItems(collectionId: string): ItemRow[] {
     .map((i) => toRow(i, false));
 }
 
-/** Все игры из коллекций, где пользователь — участник (сводный вид). */
+/** Все игры пользователя: из коллекций-участника + «без коллекции» (сводный вид). */
 export function selectAllItems(userId: string): ItemRow[] {
   seed();
   const allowed = new Set(
     members.filter((m) => m.user_id === userId).map((m) => m.collection_id)
   );
   return items
-    .filter((i) => allowed.has(i.collection_id))
+    .filter(
+      (i) =>
+        (i.collection_id !== null && allowed.has(i.collection_id)) ||
+        (i.collection_id === null && i.owner_id === userId)
+    )
     .sort((a, b) => b.added_at.localeCompare(a.added_at))
     .map((i) => toRow(i, true));
 }
@@ -265,7 +386,10 @@ export function selectItemCollectionIds(userId: string): { collection_id: string
     members.filter((m) => m.user_id === userId).map((m) => m.collection_id)
   );
   return items
-    .filter((i) => allowed.has(i.collection_id))
+    .filter(
+      (i): i is ItemRecord & { collection_id: string } =>
+        i.collection_id !== null && allowed.has(i.collection_id)
+    )
     .map((i) => ({ collection_id: i.collection_id }));
 }
 
@@ -339,4 +463,107 @@ export function removeMember(collectionId: string, userId: string): void {
     (m) => m.collection_id === collectionId && m.user_id === userId
   );
   if (idx !== -1) members.splice(idx, 1);
+}
+
+// --- Друзья ----------------------------------------------------------------
+const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+
+export function getUsername(userId: string): string | null {
+  seed();
+  return profiles.get(userId) ?? null;
+}
+
+export function setUsername(
+  userId: string,
+  username: string
+): "ok" | "taken" | "invalid" {
+  seed();
+  const n = username.trim().toLowerCase();
+  if (!USERNAME_RE.test(n)) return "invalid";
+  for (const [id, name] of profiles) {
+    if (id !== userId && name === n) return "taken";
+  }
+  profiles.set(userId, n);
+  return "ok";
+}
+
+export function profilesByIds(ids: string[]): { id: string; username: string }[] {
+  seed();
+  return ids
+    .filter((id) => profiles.has(id))
+    .map((id) => ({ id, username: profiles.get(id)! }));
+}
+
+export function profileByUsername(
+  username: string
+): { id: string; username: string } | null {
+  seed();
+  const n = username.trim().toLowerCase();
+  for (const [id, name] of profiles) {
+    if (name === n) return { id, username: name };
+  }
+  return null;
+}
+
+export function listFriendships(userId: string): FriendshipRecord[] {
+  seed();
+  return friendships
+    .filter((f) => f.requester_id === userId || f.addressee_id === userId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export function insertFriendship(
+  requesterId: string,
+  addresseeId: string
+): FriendshipRecord {
+  seed();
+  const f: FriendshipRecord = {
+    id: crypto.randomUUID(),
+    requester_id: requesterId,
+    addressee_id: addresseeId,
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  friendships.push(f);
+  return f;
+}
+
+export function acceptFriendship(id: string): void {
+  seed();
+  const f = friendships.find((x) => x.id === id);
+  if (f) f.status = "accepted";
+}
+
+export function deleteFriendship(id: string): void {
+  seed();
+  const idx = friendships.findIndex((x) => x.id === id);
+  if (idx !== -1) friendships.splice(idx, 1);
+}
+
+export function collectionsByOwner(
+  ownerId: string
+): { id: string; name: string; owner_id: string; created_at: string }[] {
+  seed();
+  return collections
+    .filter((c) => c.owner_id === ownerId)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      owner_id: c.owner_id,
+      created_at: c.created_at,
+    }));
+}
+
+export function selectItemCollectionIdsIn(
+  ids: string[]
+): { collection_id: string }[] {
+  seed();
+  const set = new Set(ids);
+  return items
+    .filter(
+      (i): i is ItemRecord & { collection_id: string } =>
+        i.collection_id !== null && set.has(i.collection_id)
+    )
+    .map((i) => ({ collection_id: i.collection_id }));
 }
