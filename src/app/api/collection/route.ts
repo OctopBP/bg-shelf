@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   addGameToCollection,
   removeGameFromCollection,
+  moveGameToCollection,
   updateCollectionItem,
   updateGameInfo,
   listCollection,
@@ -103,6 +104,47 @@ export async function DELETE(request: Request) {
 
   try {
     await removeGameFromCollection(supabase, collectionId, bggId, user.id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Неизвестная ошибка";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/** Перемещение игры между коллекциями (и «Без коллекции»). */
+export async function PUT(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const fromCollectionId = body?.fromCollectionId;
+  const toCollectionId = body?.toCollectionId;
+  if (
+    typeof fromCollectionId !== "string" ||
+    !fromCollectionId ||
+    typeof toCollectionId !== "string" ||
+    !toCollectionId
+  ) {
+    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
+  }
+  const bggId = Number(body?.bggId);
+  if (!bggId) {
+    return NextResponse.json({ error: "Не указан bggId" }, { status: 400 });
+  }
+
+  try {
+    await moveGameToCollection(
+      supabase,
+      fromCollectionId,
+      toCollectionId,
+      bggId,
+      user.id
+    );
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";

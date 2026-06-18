@@ -14,10 +14,14 @@ import {
   IconPencil,
   IconTrash,
   IconShare3,
+  IconFolderSymlink,
 } from "@tabler/icons-react";
 import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
 import ShareDialog from "./ShareDialog";
+import PromptDialog from "./PromptDialog";
+import ConfirmDialog from "./ConfirmDialog";
+import MoveGameDialog from "./MoveGameDialog";
 import { colorAt, colorForKey } from "@/lib/palette";
 import { UNCOLLECTED, type CollectionRole, type CollectionSummary } from "@/lib/collections";
 
@@ -52,6 +56,10 @@ export default function CollectionApp() {
   const [status, setStatus] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [moving, setMoving] = useState<CollectionGame | null>(null);
 
   const isAllView = activeId === ALL;
   const isUncollected = activeId === UNCOLLECTED;
@@ -60,6 +68,16 @@ export default function CollectionApp() {
   // «Без коллекции» — личные игры пользователя, всегда редактируемые.
   const canEdit = isUncollected || role === "owner" || role === "editor";
   const isOwner = role === "owner";
+  // Коллекции, в которые пользователь вправе перемещать игры.
+  const editableCollections = collections.filter(
+    (c) => c.role === "owner" || c.role === "editor"
+  );
+  // Можно ли редактировать конкретную игру (важно в сводном виде «Все игры»).
+  const canEditGame = (game: CollectionGame) => {
+    if (game.collectionId === UNCOLLECTED) return true;
+    const c = collections.find((x) => x.id === game.collectionId);
+    return c?.role === "owner" || c?.role === "editor";
+  };
 
   const loadCollections = useCallback(async (selectId?: string) => {
     const res = await fetch("/api/collections");
@@ -102,15 +120,19 @@ export default function CollectionApp() {
     loadGames();
   }, [collectionsLoaded, loadGames]);
 
+  // Куда применять команды/фото. В сводном виде «Все игры» — «Без коллекции».
+  const commandTarget = isAllView ? UNCOLLECTED : activeId;
+  const canRunCommands = isAllView || canEdit;
+
   async function runCommand(text: string) {
-    if (!text.trim() || busy || isAllView || !canEdit) return;
+    if (!text.trim() || busy || !canRunCommands) return;
     setBusy(true);
     setStatus(`Выполняю: «${text}»`);
     try {
       const res = await fetch("/api/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: text, collectionId: activeId }),
+        body: JSON.stringify({ command: text, collectionId: commandTarget }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Ошибка");
@@ -127,6 +149,23 @@ export default function CollectionApp() {
     }
   }
 
+  async function moveGame(targetId: string) {
+    const game = moving;
+    setMoving(null);
+    if (!game || targetId === game.collectionId) return;
+    await fetch("/api/collection", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fromCollectionId: game.collectionId,
+        toCollectionId: targetId,
+        bggId: game.bggId,
+      }),
+    });
+    loadGames();
+    loadCollections(activeId);
+  }
+
   async function removeGame(game: CollectionGame) {
     await fetch("/api/collection", {
       method: "DELETE",
@@ -137,9 +176,8 @@ export default function CollectionApp() {
     loadCollections(activeId);
   }
 
-  async function createCollection() {
-    const name = prompt("Название новой коллекции:")?.trim();
-    if (!name) return;
+  async function createCollection(name: string) {
+    setCreating(false);
     const res = await fetch("/api/collections", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -153,10 +191,9 @@ export default function CollectionApp() {
     }
   }
 
-  async function renameCollection() {
-    if (!activeCollection) return;
-    const name = prompt("Новое название:", activeCollection.name)?.trim();
-    if (!name || name === activeCollection.name) return;
+  async function renameCollection(name: string) {
+    setRenaming(false);
+    if (!activeCollection || name === activeCollection.name) return;
     await fetch(`/api/collections/${activeId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -165,14 +202,17 @@ export default function CollectionApp() {
     loadCollections(activeId);
   }
 
-  async function deleteCollection() {
+  function requestDeleteCollection() {
     if (!activeCollection) return;
     if (collections.length <= 1) {
       setStatus("Нельзя удалить единственную коллекцию.");
       return;
     }
-    if (!confirm(`Удалить коллекцию «${activeCollection.name}» со всеми играми?`))
-      return;
+    setConfirmingDelete(true);
+  }
+
+  async function deleteCollection() {
+    setConfirmingDelete(false);
     await fetch(`/api/collections/${activeId}`, { method: "DELETE" });
     await loadCollections(ALL);
   }
@@ -240,7 +280,7 @@ export default function CollectionApp() {
           </button>
         )}
         <button
-          onClick={createCollection}
+          onClick={() => setCreating(true)}
           aria-label="Новая коллекция"
           title="Новая коллекция"
           className="icon-btn h-9 w-9"
@@ -254,14 +294,14 @@ export default function CollectionApp() {
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {isOwner && (
             <>
-              <button onClick={renameCollection} className="btn btn-ghost px-3 py-1.5">
+              <button onClick={() => setRenaming(true)} className="btn btn-ghost px-3 py-1.5">
                 <IconPencil size={16} className="mr-1" /> Переименовать
               </button>
               <button onClick={() => setSharing(true)} className="btn btn-ghost px-3 py-1.5">
                 <IconShare3 size={16} className="mr-1" /> Поделиться
               </button>
               <button
-                onClick={deleteCollection}
+                onClick={requestDeleteCollection}
                 className="btn btn-ghost px-3 py-1.5 hover:text-coral"
               >
                 <IconTrash size={16} className="mr-1" /> Удалить
@@ -284,8 +324,8 @@ export default function CollectionApp() {
         </p>
       )}
 
-      {/* Панель команд — только когда есть права на изменение */}
-      {!isAllView && canEdit && (
+      {/* Панель команд — при правах на изменение, а в «Все игры» добавляет «Без коллекции» */}
+      {canRunCommands && (
         <div
           className="flex items-center gap-2"
           style={{ "--lift": "rgba(255,255,255,0.5)" } as React.CSSProperties}
@@ -320,7 +360,7 @@ export default function CollectionApp() {
           </form>
           <VoiceInput onTranscript={runCommand} disabled={busy} />
           <PhotoInput
-            collectionId={activeId}
+            collectionId={commandTarget}
             onAdded={() => {
               loadGames();
               loadCollections(activeId);
@@ -444,12 +484,6 @@ export default function CollectionApp() {
                     ""
                   )}
                 </p>
-                {isAllView && (
-                  <p className="mt-1 truncate text-xs font-semibold text-brand">
-                    {game.collectionName ??
-                      (game.collectionId === UNCOLLECTED ? "Без коллекции" : "")}
-                  </p>
-                )}
                 {game.tags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {game.tags.map((tag) => (
@@ -464,15 +498,25 @@ export default function CollectionApp() {
                   </div>
                 )}
               </div>
-              {!isAllView && canEdit && (
-                <button
-                  onClick={() => removeGame(game)}
-                  title="Удалить из коллекции"
-                  aria-label={`Удалить ${game.name}`}
-                  className="absolute right-2 top-2 hidden h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white group-hover:flex"
-                >
-                  <IconX size={16} stroke={3} />
-                </button>
+              {canEditGame(game) && (
+                <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
+                  <button
+                    onClick={() => setMoving(game)}
+                    title="Переместить в другую коллекцию"
+                    aria-label={`Переместить ${game.name}`}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-brand hover:text-white"
+                  >
+                    <IconFolderSymlink size={16} stroke={2.5} />
+                  </button>
+                  <button
+                    onClick={() => removeGame(game)}
+                    title="Удалить из коллекции"
+                    aria-label={`Удалить ${game.name}`}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white"
+                  >
+                    <IconX size={16} stroke={3} />
+                  </button>
+                </div>
               )}
             </div>
           ))}
@@ -485,6 +529,47 @@ export default function CollectionApp() {
           collectionName={activeCollection.name}
           currentUserId={userId}
           onClose={() => setSharing(false)}
+        />
+      )}
+
+      {creating && (
+        <PromptDialog
+          title="Новая коллекция"
+          placeholder="Название новой коллекции"
+          confirmLabel="Создать"
+          onSubmit={createCollection}
+          onClose={() => setCreating(false)}
+        />
+      )}
+
+      {renaming && activeCollection && (
+        <PromptDialog
+          title="Переименовать коллекцию"
+          placeholder="Новое название"
+          initialValue={activeCollection.name}
+          confirmLabel="Сохранить"
+          onSubmit={renameCollection}
+          onClose={() => setRenaming(false)}
+        />
+      )}
+
+      {confirmingDelete && activeCollection && (
+        <ConfirmDialog
+          title="Удалить коллекцию?"
+          message={`Коллекция «${activeCollection.name}» будет удалена со всеми играми. Это действие нельзя отменить.`}
+          confirmLabel="Удалить"
+          onConfirm={deleteCollection}
+          onClose={() => setConfirmingDelete(false)}
+        />
+      )}
+
+      {moving && (
+        <MoveGameDialog
+          gameName={moving.name}
+          currentCollectionId={moving.collectionId}
+          collections={editableCollections}
+          onMove={moveGame}
+          onClose={() => setMoving(null)}
         />
       )}
     </div>

@@ -18,6 +18,7 @@ import {
 } from "@tabler/icons-react";
 import type { CollectionGame } from "@/lib/collection";
 import { colorForKey } from "@/lib/palette";
+import ConfirmDialog from "./ConfirmDialog";
 
 interface EditableInfo {
   name: string;
@@ -55,6 +56,7 @@ export default function GameDetail({
   const [tags, setTags] = useState<string[]>(game.tags);
   const [notes, setNotes] = useState(game.notes ?? "");
   const [tagDraft, setTagDraft] = useState("");
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
 
   function startEditing() {
     setForm(toForm(game));
@@ -109,7 +111,7 @@ export default function GameDetail({
   }
 
   async function remove() {
-    if (!confirm(`Удалить «${game.name}» из коллекции?`)) return;
+    setConfirmingRemove(false);
     setSaving(true);
     try {
       await fetch("/api/collection", {
@@ -446,7 +448,7 @@ export default function GameDetail({
           {editing && (
             <div className="border-t-[3px] border-dashed border-ink/15 pt-4">
               <button
-                onClick={remove}
+                onClick={() => setConfirmingRemove(true)}
                 disabled={saving}
                 className="btn btn-coral px-4 py-2 text-sm"
               >
@@ -457,6 +459,16 @@ export default function GameDetail({
           )}
         </div>
       </div>
+
+      {confirmingRemove && (
+        <ConfirmDialog
+          title="Удалить игру?"
+          message={`«${game.name}» будет удалена из коллекции.`}
+          confirmLabel="Удалить"
+          onConfirm={remove}
+          onClose={() => setConfirmingRemove(false)}
+        />
+      )}
     </div>
   );
 }

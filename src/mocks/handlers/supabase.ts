@@ -150,6 +150,17 @@ const restHandlers = [
 
     // select без embed games — запрос для подсчёта (коллекций или orphan-игр)
     if (!select.includes("games")) {
+      // Точечный запрос конкретной записи по bgg_id (например, перед
+      // перемещением) — отдаём настоящую строку с tags/notes, а не счётчик.
+      if (bggId !== undefined) {
+        const rows = (
+          orphan ? selectUncollected(ownerId) : selectItems(String(collectionId))
+        ).filter((r) => r.bgg_id === Number(bggId));
+        if (wantsObject(request)) {
+          return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
+        }
+        return HttpResponse.json(rows);
+      }
       if (orphan) {
         return HttpResponse.json(
           selectUncollected(ownerId).map((r) => ({ id: r.id }))

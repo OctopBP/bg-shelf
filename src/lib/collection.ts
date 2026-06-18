@@ -149,6 +149,46 @@ export async function removeGameFromCollection(
   if (error) throw new Error(`Не удалось удалить: ${error.message}`);
 }
 
+/** Переносит запись игры из одной коллекции в другую (или в/из «Без коллекции»).
+ *  Теги и заметку сохраняем. BGG не трогаем — игра уже есть в кэше games. */
+export async function moveGameToCollection(
+  supabase: SupabaseClient,
+  fromCollectionId: string,
+  toCollectionId: string,
+  bggId: number,
+  userId: string
+): Promise<void> {
+  if (fromCollectionId === toCollectionId) return;
+
+  const fromOrphan = isOrphanTarget(fromCollectionId, userId);
+  const selQ = supabase
+    .from("collection_items")
+    .select("tags, notes")
+    .eq("bgg_id", bggId);
+  const { data: existing, error: selErr } = await (fromOrphan
+    ? selQ.is("collection_id", null).eq("owner_id", userId)
+    : selQ.eq("collection_id", fromCollectionId)
+  ).maybeSingle();
+  if (selErr) throw new Error(selErr.message);
+  if (!existing) throw new Error("Игра не найдена в исходной коллекции");
+  const tags = (existing.tags as string[]) ?? [];
+  const notes = (existing.notes as string | null) ?? null;
+
+  const toOrphan = isOrphanTarget(toCollectionId, userId);
+  const { error: insErr } = toOrphan
+    ? await supabase.from("collection_items").upsert(
+        { collection_id: null, owner_id: userId, bgg_id: bggId, tags, notes },
+        { onConflict: "owner_id,bgg_id" }
+      )
+    : await supabase.from("collection_items").upsert(
+        { collection_id: toCollectionId, bgg_id: bggId, tags, notes, added_by: userId },
+        { onConflict: "collection_id,bgg_id" }
+      );
+  if (insErr) throw new Error(`Не удалось переместить: ${insErr.message}`);
+
+  await removeGameFromCollection(supabase, fromCollectionId, bggId, userId);
+}
+
 export async function updateGameTags(
   supabase: SupabaseClient,
   collectionId: string,
