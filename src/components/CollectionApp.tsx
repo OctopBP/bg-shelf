@@ -109,7 +109,7 @@ export default function CollectionApp() {
   const [command, setCommand] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
   const [quickFilter, setQuickFilter] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addingGames, setAddingGames] = useState(false);
@@ -171,7 +171,7 @@ export default function CollectionApp() {
     const res = await fetch(url);
     const data = res.ok ? await res.json() : { games: [] };
     setGames((data.games as CollectionGame[]) ?? []);
-    setTagFilter(null);
+    setTagFilters([]);
     setQuickFilter(null);
     setSelecting(false);
     setSelectedIds(new Set());
@@ -389,14 +389,16 @@ export default function CollectionApp() {
     ? QUICK_FILTERS.find((f) => f.key === quickFilter)
     : undefined;
 
+  const allGamesCount = collections.map(c => c.gameCount).reduce((a, b) => a + b, 0);
+
   const visibleGames = useMemo(
     () =>
       games.filter(
         (g) =>
-          (!tagFilter || g.tags.includes(tagFilter)) &&
+          (tagFilters.length === 0 || tagFilters.every(t => g.tags.includes(t))) &&
           (!activeQuick || activeQuick.test(g)),
       ),
-    [games, tagFilter, activeQuick],
+    [games, tagFilters, activeQuick],
   );
 
   return (
@@ -421,6 +423,9 @@ export default function CollectionApp() {
             className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
           >
             Все игры
+            <span className="ml-1 transition-opacity group-hover:opacity-0">
+              · {allGamesCount}
+            </span>
           </button>
         )}
         {collections.map((c) => {
@@ -547,28 +552,13 @@ export default function CollectionApp() {
       {/* Фильтр по тегам */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setTagFilter(null)}
-            style={
-              tagFilter === null
-                ? {
-                    backgroundColor: "#fff",
-                    borderColor: "#fff",
-                    color: "#0d0d0d",
-                  }
-                : { borderColor: "#fff", color: "#fff" }
-            }
-            className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
-          >
-            все · {games.length}
-          </button>
           {allTags.map((tag) => {
             const c = colorForKey(tag);
-            const active = tagFilter === tag;
+            const active = tagFilters.includes(tag);
             return (
               <button
                 key={tag}
-                onClick={() => setTagFilter(active ? null : tag)}
+                onClick={() => setTagFilters(active ? tagFilters.filter((t) => t !== tag) : [...tagFilters, tag])}
                 style={
                   active
                     ? {
