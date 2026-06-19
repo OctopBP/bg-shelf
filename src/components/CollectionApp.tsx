@@ -88,14 +88,14 @@ const supports = (g: CollectionGame, n: number) =>
   g.maxPlayers >= n;
 
 const QUICK_FILTERS: QuickFilter[] = [
-  { key: "solo", label: "соло", test: (g) => supports(g, 1) },
-  { key: "p2", label: "на двоих", test: (g) => supports(g, 2) },
-  { key: "p4", label: "вчетвером", test: (g) => supports(g, 4) },
-  { key: "party", label: "компания 5+", test: (g) => g.maxPlayers != null && g.maxPlayers >= 5 },
-  { key: "short", label: "до 30 мин", test: (g) => g.playingTime != null && g.playingTime <= 30 },
-  { key: "long", label: "от 90 мин", test: (g) => g.playingTime != null && g.playingTime >= 90 },
-  { key: "r8", label: "рейтинг 8+", test: (g) => g.rating != null && g.rating >= 8 },
-  { key: "r9", label: "рейтинг 9+", test: (g) => g.rating != null && g.rating >= 9 },
+//   { key: "solo", label: "соло", test: (g) => supports(g, 1) },
+//   { key: "p2", label: "на двоих", test: (g) => supports(g, 2) },
+//   { key: "p4", label: "вчетвером", test: (g) => supports(g, 4) },
+//   { key: "party", label: "компания 5+", test: (g) => g.maxPlayers != null && g.maxPlayers >= 5 },
+//   { key: "short", label: "до 30 мин", test: (g) => g.playingTime != null && g.playingTime <= 30 },
+//   { key: "long", label: "от 90 мин", test: (g) => g.playingTime != null && g.playingTime >= 90 },
+//   { key: "r8", label: "рейтинг 8+", test: (g) => g.rating != null && g.rating >= 8 },
+//   { key: "r9", label: "рейтинг 9+", test: (g) => g.rating != null && g.rating >= 9 },
 ];
 
 export default function CollectionApp() {
