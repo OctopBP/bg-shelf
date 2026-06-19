@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { IconDice5Filled } from "@tabler/icons-react";
-import { USE_MOCK } from "@/lib/mock/config";
 import RainbowText from "@/components/RainbowText";
 
 export default function LoginPage() {
@@ -13,17 +12,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  async function demoLogin() {
-    setLoading(true);
-    const supabase = createClient();
-    await supabase.auth.signInWithPassword({
-      email: "demo@boardgames.local",
-      password: "demo",
-    });
-    router.push("/");
-    router.refresh();
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,27 +47,6 @@ export default function LoginPage() {
             Вход в аккаунт
           </p>
         </div>
-
-        {USE_MOCK && (
-          <div className="mb-5">
-            <button
-              type="button"
-              onClick={demoLogin}
-              disabled={loading}
-              className="btn btn-brand control-h w-full"
-            >
-              Войти в демо-режим
-            </button>
-            <p className="mt-2 text-center text-xs font-medium text-ink/45">
-              Без аккаунта — данные хранятся локально
-            </p>
-            <div className="my-4 flex items-center gap-3 text-xs font-bold uppercase tracking-widest text-ink/35">
-              <span className="h-0.5 flex-1 bg-ink/10" />
-              или
-              <span className="h-0.5 flex-1 bg-ink/10" />
-            </div>
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <input

@@ -11,9 +11,7 @@ import {
   IconStarFilled,
   IconX,
   IconPlus,
-  IconPencil,
-  IconTrash,
-  IconShare3,
+  IconSettings,
   IconFolderSymlink,
   IconChecks,
   IconCircleCheckFilled,
@@ -23,8 +21,8 @@ import {
 } from "@tabler/icons-react";
 import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
-import ShareDialog from "./ShareDialog";
-import PromptDialog from "./PromptDialog";
+import Modal from "./Modal";
+import CollectionSettingsDialog from "./CollectionSettingsDialog";
 import CreateCollectionDialog from "./CreateCollectionDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import MoveGameDialog from "./MoveGameDialog";
@@ -54,6 +52,7 @@ interface CollectionGame {
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;
+  imageUrl: string | null;
   minPlayers: number | null;
   maxPlayers: number | null;
   playingTime: number | null;
@@ -106,9 +105,9 @@ export default function CollectionApp() {
   const [status, setStatus] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [quickFilter, setQuickFilter] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addingGames, setAddingGames] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [moving, setMoving] = useState<CollectionGame | null>(null);
   // Режим выбора нескольких игр для пакетного перемещения.
@@ -197,6 +196,7 @@ export default function CollectionApp() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Ошибка");
       setCommand("");
+      setAddingGames(false);
       // Добавление игр: показываем окно подтверждения вместо мгновенного добавления.
       if (data.kind === "proposal") {
         const found = (data.games as ResolvedGame[]) ?? [];
@@ -331,7 +331,6 @@ export default function CollectionApp() {
   }
 
   async function renameCollection(name: string) {
-    setRenaming(false);
     if (!activeCollection || name === activeCollection.name) return;
     await fetch(`/api/collections/${activeId}`, {
       method: "PATCH",
@@ -351,6 +350,7 @@ export default function CollectionApp() {
       setStatus("Нельзя удалить единственную коллекцию.");
       return;
     }
+    setSettingsOpen(false);
     setConfirmingDelete(true);
   }
 
@@ -386,7 +386,10 @@ export default function CollectionApp() {
   );
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      style={{ "--lift": "rgba(255,255,255,0.5)" } as React.CSSProperties}
+    >
       {/* Вкладки коллекций */}
       <div className="flex flex-wrap items-center gap-2">
       {collectionsLoaded && (
@@ -405,24 +408,58 @@ export default function CollectionApp() {
         {collections.map((c) => {
           const active = activeId === c.id;
           const col = colorForKey(c.id);
+          const owner = c.role === "owner";
           return (
-            <button
+            <div
               key={c.id}
               onClick={() => setActiveId(c.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveId(c.id);
+                }
+              }}
               style={
                 active
                   ? { backgroundColor: col, borderColor: col, color: "#0d0d0d" }
                   : { borderColor: col, color: col }
               }
-              className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
+              className="group relative inline-flex items-center rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
             >
-              {c.name} · {c.gameCount}
-              {c.role !== "owner" && (
-                <span className="ml-1 opacity-70">
-                  {c.role === "viewer" ? "👁" : "✎"}
+              {c.name}
+              {owner ? (
+                /* Счётчик задаёт ширину (на ховере становится прозрачным),
+                   шестерёнка прижата к правому краю пилюли — так пилюля не
+                   меняет ширину при наведении. */
+                <span className="ml-1 transition-opacity group-hover:opacity-0">
+                  · {c.gameCount}
+                </span>
+              ) : (
+                <span className="ml-1 inline-flex items-center">
+                  · {c.gameCount}
+                  <span className="ml-1 opacity-70">
+                    {c.role === "viewer" ? "👁" : "✎"}
+                  </span>
                 </span>
               )}
-            </button>
+              {owner && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveId(c.id);
+                    setSettingsOpen(true);
+                  }}
+                  aria-label={`Настройки коллекции «${c.name}»`}
+                  title="Настройки коллекции"
+                  style={{ "--badge": col } as React.CSSProperties}
+                  className="absolute right-1 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full transition-colors hover:bg-(--badge) hover:text-[#0d0d0d] group-hover:flex"
+                >
+                  <IconSettings size={16} stroke={2.5} />
+                </button>
+              )}
+            </div>
           );
         })}
         <button
@@ -435,102 +472,14 @@ export default function CollectionApp() {
         </button>
       </div>
 
-      {/* Действия над активной коллекцией */}
-      {!isAllView && activeCollection && (
+      {/* Подсказка о доступе для не-владельцев */}
+      {!isAllView && activeCollection && !isOwner && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          {isOwner && (
-            <>
-              <button onClick={() => setRenaming(true)} className="btn btn-ghost px-3 py-1.5">
-                <IconPencil size={16} className="mr-1" /> Переименовать
-              </button>
-              <button onClick={() => setSharing(true)} className="btn btn-ghost px-3 py-1.5">
-                <IconShare3 size={16} className="mr-1" /> Поделиться
-              </button>
-              {!activeCollection.isDefault && (
-                <button
-                  onClick={requestDeleteCollection}
-                  className="btn btn-ghost px-3 py-1.5 hover:text-coral"
-                >
-                  <IconTrash size={16} className="mr-1" /> Удалить
-                </button>
-              )}
-              {/* Видимость коллекции */}
-              <div className="flex items-center gap-1 rounded-full border-2 border-white/25 p-1">
-                {VISIBILITY_OPTIONS.map(({ value, label, Icon }) => {
-                  const active = activeCollection.visibility === value;
-                  return (
-                    <button
-                      key={value}
-                      onClick={() => updateVisibility(value)}
-                      title={label}
-                      aria-pressed={active}
-                      className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold transition ${
-                        active
-                          ? "bg-white text-[#0d0d0d]"
-                          : "text-white/60 hover:text-white"
-                      }`}
-                    >
-                      <Icon size={14} stroke={2.5} />
-                      <span className="hidden sm:inline">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-          {!isOwner && (
-            <span className="text-muted">
-              {role === "viewer"
-                ? "Доступ только на просмотр"
-                : "Общая коллекция · можно редактировать"}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Панель команд — при правах на изменение; в «Все игры» добавляет в коллекцию по умолчанию */}
-      {canRunCommands && (
-        <div
-          className="flex items-center gap-2"
-          style={{ "--lift": "rgba(255,255,255,0.5)" } as React.CSSProperties}
-        >
-          <form
-            className="flex flex-1 gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              runCommand(command);
-            }}
-          >
-            <input
-              type="text"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              disabled={busy}
-              placeholder='Например: «добавь Каркассон и Манчкин, пометь Манчкин как пати»'
-              className="field control-h flex-1 rounded-full px-5 text-sm disabled:opacity-50 sm:text-base"
-            />
-            <button
-              type="submit"
-              disabled={busy || !command.trim()}
-              aria-label="Выполнить команду"
-              className="btn btn-brand control-h shrink-0 px-5"
-            >
-              {busy ? (
-                <IconLoader2 size={22} className="animate-spin" />
-              ) : (
-                <IconArrowRight size={22} stroke={2.5} />
-              )}
-            </button>
-          </form>
-          <VoiceInput onTranscript={runCommand} disabled={busy} />
-          <PhotoInput
-            collectionId={commandTarget}
-            onAdded={() => {
-              loadGames();
-              loadCollections(activeId);
-            }}
-            onStatus={setStatus}
-          />
+          <span className="text-muted">
+            {role === "viewer"
+              ? "Доступ только на просмотр"
+              : "Общая коллекция · можно редактировать"}
+          </span>
         </div>
       )}
 
@@ -600,35 +549,46 @@ export default function CollectionApp() {
         </div>
       )}
 
-      {/* Выбор нескольких игр для перемещения */}
-      {loaded && collectionsLoaded && visibleGames.some(canEditGame) && (
+      {/* Добавление игр и выбор нескольких для перемещения */}
+      {loaded &&
+        collectionsLoaded &&
+        (canRunCommands || visibleGames.some(canEditGame)) && (
         <div className="flex flex-wrap items-center gap-2">
-          {!selecting ? (
-            <button
-              onClick={() => setSelecting(true)}
-              className="btn btn-ghost px-3 py-1.5 text-sm"
-            >
-              <IconChecks size={16} className="mr-1" /> Выбрать несколько
-            </button>
-          ) : (
-            <>
-              <span className="text-sm font-bold text-ink">
-                Выбрано: {selectedIds.size}
-              </span>
+          {visibleGames.some(canEditGame) &&
+            (!selecting ? (
               <button
-                onClick={() => setBulkMoving(true)}
-                disabled={selectedIds.size === 0}
-                className="btn btn-brand px-4 py-1.5 text-sm disabled:opacity-50"
-              >
-                <IconFolderSymlink size={16} className="mr-1" /> Переместить
-              </button>
-              <button
-                onClick={exitSelection}
+                onClick={() => setSelecting(true)}
                 className="btn btn-ghost px-3 py-1.5 text-sm"
               >
-                Отмена
+                <IconChecks size={16} className="mr-1" /> Выбрать несколько
               </button>
-            </>
+            ) : (
+              <>
+                <span className="text-sm font-bold text-white">
+                  Выбрано: {selectedIds.size}
+                </span>
+                <button
+                  onClick={() => setBulkMoving(true)}
+                  disabled={selectedIds.size === 0}
+                  className="btn btn-brand px-4 py-1.5 text-sm disabled:opacity-50"
+                >
+                  <IconFolderSymlink size={16} className="mr-1" /> Переместить
+                </button>
+                <button
+                  onClick={exitSelection}
+                  className="btn btn-ghost px-3 py-1.5 text-sm"
+                >
+                  Отмена
+                </button>
+              </>
+            ))}
+          {canRunCommands && !selecting && (
+            <button
+              onClick={() => setAddingGames(true)}
+              className="btn btn-brand ml-auto px-3 py-1.5 text-sm"
+            >
+              <IconPlus size={16} className="mr-1" /> Добавить игры
+            </button>
           )}
         </div>
       )}
@@ -688,10 +648,10 @@ export default function CollectionApp() {
               )}
               <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
                 <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
-                  {game.thumbnailUrl ? (
+                  {game.imageUrl || game.thumbnailUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={game.thumbnailUrl}
+                      src={game.imageUrl ?? game.thumbnailUrl ?? ""}
                       alt={game.name}
                       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                     />
@@ -768,12 +728,67 @@ export default function CollectionApp() {
         </div>
       )}
 
-      {sharing && activeCollection && (
-        <ShareDialog
-          collectionId={activeCollection.id}
-          collectionName={activeCollection.name}
+      {addingGames && canRunCommands && (
+        <Modal title="Добавить игры" onClose={() => setAddingGames(false)}>
+          <div className="space-y-4">
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                runCommand(command);
+              }}
+            >
+              <input
+                autoFocus
+                type="text"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                disabled={busy}
+                placeholder='Например: «добавь Каркассон и Манчкин, пометь Манчкин как пати»'
+                className="field control-h flex-1 rounded-full px-5 text-sm disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={busy || !command.trim()}
+                aria-label="Выполнить команду"
+                className="btn btn-brand control-h shrink-0 px-5"
+              >
+                {busy ? (
+                  <IconLoader2 size={22} className="animate-spin" />
+                ) : (
+                  <IconArrowRight size={22} stroke={2.5} />
+                )}
+              </button>
+            </form>
+            <div className="flex items-center gap-2">
+              <VoiceInput onTranscript={runCommand} disabled={busy} />
+              <PhotoInput
+                collectionId={commandTarget}
+                onAdded={() => {
+                  setAddingGames(false);
+                  loadGames();
+                  loadCollections(activeId);
+                }}
+                onStatus={setStatus}
+              />
+              <span className="text-xs font-medium text-ink/55">
+                Или скажите голосом / загрузите фото полки с играми
+              </span>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {settingsOpen && activeCollection && (
+        <CollectionSettingsDialog
+          collection={activeCollection}
+          visibilityOptions={VISIBILITY_OPTIONS}
           currentUserId={userId}
-          onClose={() => setSharing(false)}
+          canDelete={!activeCollection.isDefault && collections.length > 1}
+          onRename={renameCollection}
+          onUpdateVisibility={updateVisibility}
+          onRequestDelete={requestDeleteCollection}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -782,17 +797,6 @@ export default function CollectionApp() {
           options={VISIBILITY_OPTIONS}
           onSubmit={createCollection}
           onClose={() => setCreating(false)}
-        />
-      )}
-
-      {renaming && activeCollection && (
-        <PromptDialog
-          title="Переименовать коллекцию"
-          placeholder="Новое название"
-          initialValue={activeCollection.name}
-          confirmLabel="Сохранить"
-          onSubmit={renameCollection}
-          onClose={() => setRenaming(false)}
         />
       )}
 

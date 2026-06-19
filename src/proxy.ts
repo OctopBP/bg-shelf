@@ -1,6 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { publicOrigin } from "@/lib/public-url";
+import {
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY,
+  USE_MOCK,
+} from "@/lib/mock/config";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -9,11 +14,27 @@ export async function proxy(request: NextRequest) {
   // доступны без сессии, иначе редирект на /login сорвёт подтверждение токена.
   const isPublicRoute = isLoginRoute || pathname.startsWith("/auth");
 
+  // Прокси Next исполняется в рантайме, который MSW не патчит, поэтому в
+  // мок-режиме сетевой getUser недоступен (ушёл бы в реальный Supabase). Считаем
+  // авторизацией наличие session-куки: логин её ставит, выход — убирает.
+  if (USE_MOCK) {
+    const hasSession = request.cookies
+      .getAll()
+      .some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+    if (!hasSession && !isPublicRoute) {
+      return NextResponse.redirect(new URL("/login", publicOrigin(request)));
+    }
+    if (hasSession && isLoginRoute) {
+      return NextResponse.redirect(new URL("/", publicOrigin(request)));
+    }
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY,
     {
       cookies: {
         getAll() {

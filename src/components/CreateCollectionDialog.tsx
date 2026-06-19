@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 import { IconCheck } from "@tabler/icons-react";
 import Modal from "./Modal";
+import RoleSegmentedControl from "./RoleSegmentedControl";
 import type { CollectionRole, CollectionVisibility } from "@/lib/collections";
 import type { Friend } from "@/lib/friends";
 
@@ -126,15 +127,11 @@ export default function CreateCollectionDialog({
               })}
             </div>
             {invited.size > 0 && (
-              <select
+              <RoleSegmentedControl
                 value={role}
-                onChange={(e) => setRole(e.target.value as InviteRole)}
-                className="field w-full px-3 py-2.5 text-sm"
+                onChange={setRole}
                 aria-label="Роль приглашённых друзей"
-              >
-                <option value="editor">Редактор (полный доступ)</option>
-                <option value="viewer">Только просмотр</option>
-              </select>
+              />
             )}
           </div>
         )}

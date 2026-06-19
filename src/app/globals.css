@@ -53,6 +53,17 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
+/* Tailwind v4 preflight drops the default pointer on buttons — restore it for
+   all interactive controls (buttons, role="button" badges, etc.). */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+}
+
 /* ---------------------------------------------------------------------------
    Reusable component classes
 --------------------------------------------------------------------------- */
@@ -101,18 +112,20 @@ body {
     box-shadow: 0 1px 0 0 var(--color-coral-dark);
   }
 
-  /* Outline button for use on WHITE surfaces (e.g. modal cancel) */
+  /* White sticker button. The drop "подложка" follows --lift so it stays
+     visible on the black canvas (translucent white) and on white surfaces
+     (.surface resets --lift back to ink). */
   .btn-ghost {
     background-color: #fff;
     color: var(--color-ink);
-    box-shadow: 0 5px 0 0 var(--color-ink);
+    box-shadow: 0 5px 0 0 var(--lift, var(--color-ink));
   }
   .btn-ghost:hover {
     background-color: #f1f1f1;
   }
   .btn-ghost:active {
     transform: translateY(4px);
-    box-shadow: 0 1px 0 0 var(--color-ink);
+    box-shadow: 0 1px 0 0 var(--lift, var(--color-ink));
   }
 
   /* Outline button for use on the BLACK canvas (e.g. sign out) */
@@ -160,8 +173,10 @@ body {
     pointer-events: none;
   }
 
-  /* White sticker surface — fat black outline + hard offset shadow */
+  /* White sticker surface — fat black outline + hard offset shadow.
+     Buttons/fields inside sit on white, so their lift goes back to ink. */
   .surface {
+    --lift: var(--color-ink);
     background-color: var(--color-surface);
     color: var(--color-ink);
     border: 3px solid var(--color-ink);
