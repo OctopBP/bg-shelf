@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { IconDice5Filled } from "@tabler/icons-react";
 import RainbowText from "@/components/RainbowText";
 
 export default function LoginPage() {
@@ -36,9 +35,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center p-4">
       <div className="surface animate-pop-in w-full max-w-sm p-8">
         <div className="mb-6">
-          <span className="mb-4 flex h-12 w-12 rotate-[-6deg] items-center justify-center rounded-2xl border-[3px] border-ink bg-brand text-white">
-            <IconDice5Filled size={26} />
-          </span>
+          <img className="mb-4 flex h-12 w-12" src="polkins.png" alt=" Полкинс" />
           <RainbowText
             text="Полка"
             className="font-display text-2xl font-extrabold tracking-tight"

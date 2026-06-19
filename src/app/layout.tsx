@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Unbounded, Onest } from "next/font/google";
 import "./globals.css";
 import MswReady from "@/components/MswReady";
@@ -20,6 +20,15 @@ export const metadata: Metadata = {
   title: "Полка — коллекция настольных игр",
   description:
     "Коллекция настольных игр с голосовым вводом, добавлением по фото и данными из BoardGameGeek",
+  appleWebApp: {
+    capable: true,
+    title: "Полка",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0d0d0d",
 };
 
 export default function RootLayout({

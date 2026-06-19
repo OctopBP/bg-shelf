@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { IconDice5Filled, IconUsers } from "@tabler/icons-react";
+import { IconUsers } from "@tabler/icons-react";
 import CollectionApp from "@/components/CollectionApp";
 import SignOutButton from "@/components/SignOutButton";
 import RainbowText from "@/components/RainbowText";
@@ -19,9 +19,7 @@ export default async function HomePage() {
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-10">
         <header className="mb-8 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="flex h-12 w-12 rotate-[-6deg] items-center justify-center rounded-2xl border-[3px] border-white bg-brand text-white">
-              <IconDice5Filled size={26} />
-            </span>
+            <img className="flex h-12 w-12" src="polkins.png" alt=" Полкинс" />
             <div className="leading-tight">
               <RainbowText
                 text="Полка"

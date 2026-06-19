@@ -72,5 +72,5 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Exclude the MSW worker script too: it must be served directly, never
   // redirected (a redirected service-worker script fails registration).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|mockServiceWorker.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|mockServiceWorker.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };
