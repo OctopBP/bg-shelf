@@ -153,18 +153,18 @@ export async function runCollectionAgent(
         }`;
       }
       case "remove_from_collection": {
-        await removeGameFromCollection(supabase, collectionId, Number(input.bgg_id), userId);
+        await removeGameFromCollection(supabase, collectionId, Number(input.bgg_id));
         changed = true;
         return "Игра удалена из коллекции";
       }
       case "set_tags": {
         const tags = (input.tags as string[]).map((t) => t.toLowerCase());
-        await updateGameTags(supabase, collectionId, Number(input.bgg_id), tags, userId);
+        await updateGameTags(supabase, collectionId, Number(input.bgg_id), tags);
         changed = true;
         return `Теги обновлены: ${tags.join(", ")}`;
       }
       case "list_collection": {
-        const items = await listCollection(supabase, collectionId, userId);
+        const items = await listCollection(supabase, collectionId);
         return JSON.stringify(
           items.map((i) => ({ bgg_id: i.bggId, name: i.name, tags: i.tags }))
         );

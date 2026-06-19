@@ -24,11 +24,14 @@ export interface GameRecord {
 }
 
 export type Role = "owner" | "editor" | "viewer";
+export type Visibility = "public" | "friends" | "private";
 
 interface CollectionRecord {
   id: string;
   owner_id: string;
   name: string;
+  visibility: Visibility;
+  is_default: boolean;
   created_at: string;
 }
 
@@ -40,9 +43,7 @@ interface MemberRecord {
 
 export interface ItemRecord {
   id: string;
-  /** null → игра «без коллекции», принадлежит owner_id. */
-  collection_id: string | null;
-  owner_id: string | null;
+  collection_id: string;
   bgg_id: number;
   tags: string[];
   notes: string | null;
@@ -53,7 +54,7 @@ export interface ItemRecord {
 /** Row shape returned by the joined select, matching the real query. */
 export interface ItemRow {
   id: string;
-  collection_id: string | null;
+  collection_id: string;
   bgg_id: number;
   tags: string[];
   notes: string | null;
@@ -136,8 +137,8 @@ function seed() {
 
   const now = Date.now();
   collections.push(
-    { id: SHELF_ID, owner_id: DEMO_USER.id, name: "Полка", created_at: new Date(now - 2 * 86_400_000).toISOString() },
-    { id: WISHLIST_ID, owner_id: DEMO_USER.id, name: "Хочу купить", created_at: new Date(now - 86_400_000).toISOString() }
+    { id: SHELF_ID, owner_id: DEMO_USER.id, name: "Полка", visibility: "public", is_default: true, created_at: new Date(now - 2 * 86_400_000).toISOString() },
+    { id: WISHLIST_ID, owner_id: DEMO_USER.id, name: "Хочу купить", visibility: "friends", is_default: false, created_at: new Date(now - 86_400_000).toISOString() }
   );
   members.push(
     { collection_id: SHELF_ID, user_id: DEMO_USER.id, role: "owner" },
@@ -147,7 +148,6 @@ function seed() {
     items.push({
       id: crypto.randomUUID(),
       collection_id: SHELF_ID,
-      owner_id: null,
       bgg_id: bggId,
       tags,
       notes: null,
@@ -155,11 +155,10 @@ function seed() {
       added_by: DEMO_USER.id,
     });
   });
-  // Одна игра «без коллекции» у демо-пользователя — для вкладки «Без коллекции».
+  // Ещё одна игра в дефолтной коллекции.
   items.push({
     id: crypto.randomUUID(),
-    collection_id: null,
-    owner_id: DEMO_USER.id,
+    collection_id: SHELF_ID,
     bgg_id: 199792,
     tags: ["хочу попробовать"],
     notes: null,
@@ -178,6 +177,8 @@ function seed() {
     id: FRIEND_COLLECTION_ID,
     owner_id: FRIEND_USER.id,
     name: "Коллекция друга",
+    visibility: "friends",
+    is_default: true,
     created_at: new Date(now - 5 * 86_400_000).toISOString(),
   });
   members.push({
@@ -189,7 +190,6 @@ function seed() {
     items.push({
       id: crypto.randomUUID(),
       collection_id: FRIEND_COLLECTION_ID,
-      owner_id: null,
       bgg_id: bggId,
       tags: [],
       notes: null,
@@ -223,19 +223,14 @@ export function updateGame(bggId: number, fields: Partial<GameRecord>): void {
 
 // --- Collection items ------------------------------------------------------
 export function upsertItem(
-  collectionId: string | null,
+  collectionId: string,
   bggId: number,
   tags: string[],
-  ownerOrAddedBy?: string | null
+  addedBy?: string | null
 ): void {
   seed();
-  // orphan ищем по (owner_id, bgg_id), записи коллекций — по (collection_id, bgg_id)
-  const existing = items.find((i) =>
-    collectionId === null
-      ? i.collection_id === null &&
-        i.owner_id === ownerOrAddedBy &&
-        i.bgg_id === bggId
-      : i.collection_id === collectionId && i.bgg_id === bggId
+  const existing = items.find(
+    (i) => i.collection_id === collectionId && i.bgg_id === bggId
   );
   if (existing) {
     existing.tags = tags;
@@ -244,12 +239,11 @@ export function upsertItem(
   items.push({
     id: crypto.randomUUID(),
     collection_id: collectionId,
-    owner_id: collectionId === null ? (ownerOrAddedBy ?? null) : null,
     bgg_id: bggId,
     tags,
     notes: null,
     added_at: new Date().toISOString(),
-    added_by: collectionId === null ? null : (ownerOrAddedBy ?? null),
+    added_by: addedBy ?? null,
   });
 }
 
@@ -275,43 +269,6 @@ export function updateItemFields(
   if (fields.notes !== undefined) item.notes = fields.notes;
 }
 
-// --- «Без коллекции» (orphan-записи) --------------------------------------
-export function selectUncollected(ownerId: string): ItemRow[] {
-  seed();
-  return items
-    .filter((i) => i.collection_id === null && i.owner_id === ownerId)
-    .sort((a, b) => b.added_at.localeCompare(a.added_at))
-    .map((i) => toRow(i, false));
-}
-
-export function deleteUncollected(ownerId: string, bggId: number): void {
-  seed();
-  const idx = items.findIndex(
-    (i) => i.collection_id === null && i.owner_id === ownerId && i.bgg_id === bggId
-  );
-  if (idx !== -1) items.splice(idx, 1);
-}
-
-export function updateUncollectedFields(
-  ownerId: string,
-  bggId: number,
-  fields: { tags?: string[]; notes?: string | null }
-): void {
-  seed();
-  const item = items.find(
-    (i) => i.collection_id === null && i.owner_id === ownerId && i.bgg_id === bggId
-  );
-  if (!item) return;
-  if (fields.tags !== undefined) item.tags = fields.tags;
-  if (fields.notes !== undefined) item.notes = fields.notes;
-}
-
-export function countUncollected(ownerId: string): number {
-  seed();
-  return items.filter((i) => i.collection_id === null && i.owner_id === ownerId)
-    .length;
-}
-
 function toRow(i: ItemRecord, withCollection: boolean): ItemRow {
   return {
     id: i.id,
@@ -321,14 +278,11 @@ function toRow(i: ItemRecord, withCollection: boolean): ItemRow {
     notes: i.notes,
     added_at: i.added_at,
     games: games.get(i.bgg_id) ?? null,
-    // orphan-записи (collection_id = null) отдают embed collections как null,
-    // как настоящий PostgREST.
     ...(withCollection
       ? {
-          collections:
-            i.collection_id === null
-              ? null
-              : { name: collections.find((c) => c.id === i.collection_id)?.name ?? "" },
+          collections: {
+            name: collections.find((c) => c.id === i.collection_id)?.name ?? "",
+          },
         }
       : {}),
   };
@@ -343,18 +297,14 @@ export function selectItems(collectionId: string): ItemRow[] {
     .map((i) => toRow(i, false));
 }
 
-/** Все игры пользователя: из коллекций-участника + «без коллекции» (сводный вид). */
+/** Все игры пользователя из коллекций-участника (сводный вид «Все игры»). */
 export function selectAllItems(userId: string): ItemRow[] {
   seed();
   const allowed = new Set(
     members.filter((m) => m.user_id === userId).map((m) => m.collection_id)
   );
   return items
-    .filter(
-      (i) =>
-        (i.collection_id !== null && allowed.has(i.collection_id)) ||
-        (i.collection_id === null && i.owner_id === userId)
-    )
+    .filter((i) => allowed.has(i.collection_id))
     .sort((a, b) => b.added_at.localeCompare(a.added_at))
     .map((i) => toRow(i, true));
 }
@@ -370,7 +320,14 @@ export function selectMemberships(userId: string) {
       return {
         role: m.role,
         collections: c
-          ? { id: c.id, name: c.name, owner_id: c.owner_id, created_at: c.created_at }
+          ? {
+              id: c.id,
+              name: c.name,
+              owner_id: c.owner_id,
+              visibility: c.visibility,
+              is_default: c.is_default,
+              created_at: c.created_at,
+            }
           : null,
       };
     })
@@ -399,6 +356,8 @@ export function createCollection(userId: string, name: string): CollectionRecord
     id: crypto.randomUUID(),
     owner_id: userId,
     name,
+    visibility: "public",
+    is_default: false,
     created_at: new Date().toISOString(),
   };
   collections.push(c);
@@ -410,6 +369,12 @@ export function renameCollection(collectionId: string, name: string): void {
   seed();
   const c = collections.find((col) => col.id === collectionId);
   if (c) c.name = name;
+}
+
+export function setVisibility(collectionId: string, visibility: Visibility): void {
+  seed();
+  const c = collections.find((col) => col.id === collectionId);
+  if (c) c.visibility = visibility;
 }
 
 export function deleteCollection(collectionId: string): void {
@@ -540,17 +505,25 @@ export function deleteFriendship(id: string): void {
   if (idx !== -1) friendships.splice(idx, 1);
 }
 
-export function collectionsByOwner(
-  ownerId: string
-): { id: string; name: string; owner_id: string; created_at: string }[] {
+export function collectionsByOwner(ownerId: string): {
+  id: string;
+  name: string;
+  owner_id: string;
+  visibility: Visibility;
+  is_default: boolean;
+  created_at: string;
+}[] {
   seed();
   return collections
-    .filter((c) => c.owner_id === ownerId)
+    // Страница друга: приватные коллекции не показываем (как RLS).
+    .filter((c) => c.owner_id === ownerId && c.visibility !== "private")
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .map((c) => ({
       id: c.id,
       name: c.name,
       owner_id: c.owner_id,
+      visibility: c.visibility,
+      is_default: c.is_default,
       created_at: c.created_at,
     }));
 }

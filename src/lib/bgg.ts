@@ -110,14 +110,49 @@ async function bggFetch(path: string, retries = 3): Promise<string> {
   throw new Error("BGG API: превышено число попыток (ответ 202)");
 }
 
-export async function searchBgg(query: string): Promise<BggSearchResult[]> {
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * BGG отдаёт результаты поиска по алфавиту, а не по релевантности. Чтобы
+ * запрошенная игра не утонула среди однокоренных названий, поднимаем наверх
+ * точные и префиксные совпадения. Сортировка стабильная — внутри группы
+ * сохраняется исходный (алфавитный) порядок BGG.
+ */
+function rankByRelevance(
+  query: string,
+  results: BggSearchResult[]
+): BggSearchResult[] {
+  const q = query.trim().toLowerCase();
+  const wordRe = new RegExp(`\\b${escapeRegExp(q)}\\b`);
+  const score = (name: string): number => {
+    const n = name.toLowerCase();
+    if (n === q) return 0;
+    if (n.startsWith(`${q} `) || n.startsWith(`${q}:`)) return 1;
+    if (n.startsWith(q)) return 2;
+    if (wordRe.test(n)) return 3;
+    return 4;
+  };
+  return results
+    .map((r, i) => ({ r, i, s: score(r.name) }))
+    .sort((a, b) => a.s - b.s || a.i - b.i)
+    .map((x) => x.r);
+}
+
+async function rawSearch(
+  query: string,
+  exact: boolean
+): Promise<BggSearchResult[]> {
   const xml = await bggFetch(
-    `/search?query=${encodeURIComponent(query)}&type=boardgame`
+    `/search?query=${encodeURIComponent(query)}&type=boardgame${
+      exact ? "&exact=1" : ""
+    }`
   );
   const doc = parser.parse(xml);
   const items = asArray(doc.items?.item);
 
-  return items.slice(0, 10).map((item: Record<string, unknown>) => {
+  return items.map((item: Record<string, unknown>) => {
     const nameNode = asArray(item.name)[0] as Record<string, string>;
     const yearNode = item.yearpublished as Record<string, string> | undefined;
     return {
@@ -126,6 +161,27 @@ export async function searchBgg(query: string): Promise<BggSearchResult[]> {
       yearPublished: yearNode ? Number(yearNode["@_value"]) : null,
     };
   });
+}
+
+export async function searchBgg(query: string): Promise<BggSearchResult[]> {
+  // Поиск BGG ищет подстроку и сортирует по алфавиту, поэтому очевидная игра
+  // прячется далеко вниз: запрос «Oath» отдаёт «Blood Oath», «Oathbreaker» и
+  // т.п., но не саму «Oath» в первой десятке. Сначала запрашиваем точные
+  // совпадения по имени (exact=1) — это и есть искомая игра, — затем дополняем
+  // обычным поиском, ранжированным по близости к запросу.
+  const [exact, fuzzy] = await Promise.all([
+    rawSearch(query, true).catch(() => [] as BggSearchResult[]),
+    rawSearch(query, false),
+  ]);
+
+  const seen = new Set<number>();
+  const merged: BggSearchResult[] = [];
+  for (const r of [...exact, ...rankByRelevance(query, fuzzy)]) {
+    if (Number.isNaN(r.bggId) || seen.has(r.bggId)) continue;
+    seen.add(r.bggId);
+    merged.push(r);
+  }
+  return merged.slice(0, 10);
 }
 
 export async function getBggGameDetails(

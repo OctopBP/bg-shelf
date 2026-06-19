@@ -1,9 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Псевдо-id виртуальной коллекции «Без коллекции» (игры без collection_id). */
-export const UNCOLLECTED = "uncollected";
-
 export type CollectionRole = "owner" | "editor" | "viewer";
+
+/** Кто видит коллекцию помимо владельца и явно приглашённых участников. */
+export type CollectionVisibility = "public" | "friends" | "private";
 
 export interface CollectionSummary {
   id: string;
@@ -11,6 +11,10 @@ export interface CollectionSummary {
   ownerId: string;
   /** Роль текущего пользователя в этой коллекции. */
   role: CollectionRole;
+  /** Кто видит коллекцию. */
+  visibility: CollectionVisibility;
+  /** true → коллекция по умолчанию (её нельзя удалить). */
+  isDefault: boolean;
   gameCount: number;
 }
 
@@ -34,7 +38,7 @@ export async function listCollections(
 
   const { data, error } = await supabase
     .from("collection_members")
-    .select("role, collections(id, name, owner_id, created_at)")
+    .select("role, collections(id, name, owner_id, visibility, is_default, created_at)")
     .eq("user_id", user.id)
     .order("created_at", { referencedTable: "collections", ascending: true });
   if (error) throw new Error(error.message);
@@ -62,6 +66,8 @@ export async function listCollections(
         name: c.name as string,
         ownerId: c.owner_id as string,
         role: (row as { role: CollectionRole }).role,
+        visibility: (c.visibility as CollectionVisibility) ?? "public",
+        isDefault: (c.is_default as boolean) ?? false,
         gameCount: counts.get(id) ?? 0,
       } satisfies CollectionSummary;
     })
@@ -79,7 +85,7 @@ export async function listCollectionsByOwner(
 ): Promise<CollectionSummary[]> {
   const { data, error } = await supabase
     .from("collections")
-    .select("id, name, owner_id, created_at")
+    .select("id, name, owner_id, visibility, is_default, created_at")
     .eq("owner_id", ownerId)
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
@@ -88,6 +94,8 @@ export async function listCollectionsByOwner(
     id: string;
     name: string;
     owner_id: string;
+    visibility: CollectionVisibility;
+    is_default: boolean;
   }[];
   if (collections.length === 0) return [];
 
@@ -108,20 +116,10 @@ export async function listCollectionsByOwner(
     name: c.name,
     ownerId: c.owner_id,
     role: "viewer" as const,
+    visibility: c.visibility ?? "public",
+    isDefault: c.is_default ?? false,
     gameCount: counts.get(c.id) ?? 0,
   }));
-}
-
-/** Сколько у пользователя игр «без коллекции» (RLS ограничивает своими). */
-export async function countUncollected(
-  supabase: SupabaseClient
-): Promise<number> {
-  const { data, error } = await supabase
-    .from("collection_items")
-    .select("id")
-    .is("collection_id", null);
-  if (error) throw new Error(error.message);
-  return (data ?? []).length;
 }
 
 export async function createCollection(
@@ -144,6 +142,18 @@ export async function renameCollection(
   const { error } = await supabase
     .from("collections")
     .update({ name })
+    .eq("id", collectionId);
+  if (error) throw new Error(error.message);
+}
+
+export async function setCollectionVisibility(
+  supabase: SupabaseClient,
+  collectionId: string,
+  visibility: CollectionVisibility
+): Promise<void> {
+  const { error } = await supabase
+    .from("collections")
+    .update({ visibility })
     .eq("id", collectionId);
   if (error) throw new Error(error.message);
 }

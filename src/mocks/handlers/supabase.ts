@@ -13,14 +13,12 @@ import {
   updateGame,
   selectItems,
   selectAllItems,
-  selectUncollected,
-  deleteUncollected,
-  updateUncollectedFields,
   selectMemberships,
   selectItemCollectionIds,
   selectItemCollectionIdsIn,
   createCollection,
   renameCollection,
+  setVisibility,
   deleteCollection,
   memberEmails,
   shareCollection,
@@ -130,13 +128,11 @@ const PGRST116 = HttpResponse.json(
 );
 
 const restHandlers = [
-  // collection_items: одна коллекция (?collection_id=eq…), «без коллекции»
-  // (?collection_id=is.null), все игры (embed collections) или список
-  // collection_id для счётчиков.
+  // collection_items: одна коллекция (?collection_id=eq…), все игры (embed
+  // collections) или список collection_id для счётчиков.
   http.get("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
     const select = url.searchParams.get("select") ?? "";
-    const orphan = url.searchParams.get("collection_id") === "is.null";
     const collectionIdRaw = url.searchParams.get("collection_id");
     const inList = collectionIdRaw?.startsWith("in.(")
       ? collectionIdRaw
@@ -144,27 +140,21 @@ const restHandlers = [
           .split(",")
           .map((s) => s.replace(/^"|"$/g, ""))
       : null;
-    const collectionId = orphan || inList ? undefined : eqValue(url, "collection_id");
-    const ownerId = eqValue(url, "owner_id") ?? DEMO_USER.id;
+    const collectionId = inList ? undefined : eqValue(url, "collection_id");
     const bggId = eqValue(url, "bgg_id");
 
-    // select без embed games — запрос для подсчёта (коллекций или orphan-игр)
+    // select без embed games — запрос для подсчёта.
     if (!select.includes("games")) {
       // Точечный запрос конкретной записи по bgg_id (например, перед
       // перемещением) — отдаём настоящую строку с tags/notes, а не счётчик.
-      if (bggId !== undefined) {
-        const rows = (
-          orphan ? selectUncollected(ownerId) : selectItems(String(collectionId))
-        ).filter((r) => r.bgg_id === Number(bggId));
+      if (bggId !== undefined && collectionId !== undefined) {
+        const rows = selectItems(collectionId).filter(
+          (r) => r.bgg_id === Number(bggId)
+        );
         if (wantsObject(request)) {
           return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
         }
         return HttpResponse.json(rows);
-      }
-      if (orphan) {
-        return HttpResponse.json(
-          selectUncollected(ownerId).map((r) => ({ id: r.id }))
-        );
       }
       // Счётчики игр для коллекций друга (?collection_id=in.(…)).
       if (inList) {
@@ -173,9 +163,8 @@ const restHandlers = [
       return HttpResponse.json(selectItemCollectionIds(DEMO_USER.id));
     }
 
-    let rows = orphan
-      ? selectUncollected(ownerId)
-      : collectionId !== undefined
+    let rows =
+      collectionId !== undefined
         ? selectItems(collectionId)
         : selectAllItems(DEMO_USER.id);
     if (bggId !== undefined) {
@@ -188,20 +177,18 @@ const restHandlers = [
     return HttpResponse.json(rows);
   }),
 
-  // upsert collection_items (one object or an array). collection_id = null →
-  // orphan-запись, владелец берётся из owner_id.
+  // upsert collection_items (one object or an array).
   http.post("*/rest/v1/collection_items", async ({ request }) => {
     const body = await request.json();
     const rows = (Array.isArray(body) ? body : [body]) as Array<
       Record<string, unknown>
     >;
     for (const row of rows) {
-      const cid = (row.collection_id as string | null) ?? null;
       upsertItem(
-        cid,
+        String(row.collection_id),
         Number(row.bgg_id),
         (row.tags as string[]) ?? [],
-        (cid === null ? row.owner_id : row.added_by) as string | null
+        (row.added_by as string | null) ?? null
       );
     }
     return HttpResponse.json([], { status: 201 });
@@ -210,11 +197,7 @@ const restHandlers = [
   http.delete("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
     const bggId = Number(eqValue(url, "bgg_id"));
-    if (url.searchParams.get("collection_id") === "is.null") {
-      deleteUncollected(eqValue(url, "owner_id") ?? DEMO_USER.id, bggId);
-    } else {
-      deleteItem(String(eqValue(url, "collection_id")), bggId);
-    }
+    deleteItem(String(eqValue(url, "collection_id")), bggId);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -229,11 +212,7 @@ const restHandlers = [
       ...(body.notes !== undefined ? { notes: body.notes } : {}),
     };
     const bggId = Number(eqValue(url, "bgg_id"));
-    if (url.searchParams.get("collection_id") === "is.null") {
-      updateUncollectedFields(eqValue(url, "owner_id") ?? DEMO_USER.id, bggId, patch);
-    } else {
-      updateItemFields(String(eqValue(url, "collection_id")), bggId, patch);
-    }
+    updateItemFields(String(eqValue(url, "collection_id")), bggId, patch);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -267,13 +246,16 @@ const restHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // collections: переименование и удаление
+  // collections: переименование, видимость и удаление
   http.patch("*/rest/v1/collections", async ({ request }) => {
     const url = new URL(request.url);
-    const body = (await request.json()) as { name?: string };
-    if (body.name !== undefined) {
-      renameCollection(String(eqValue(url, "id")), body.name);
-    }
+    const body = (await request.json()) as {
+      name?: string;
+      visibility?: "public" | "friends" | "private";
+    };
+    const id = String(eqValue(url, "id"));
+    if (body.name !== undefined) renameCollection(id, body.name);
+    if (body.visibility !== undefined) setVisibility(id, body.visibility);
     return new HttpResponse(null, { status: 204 });
   }),
 

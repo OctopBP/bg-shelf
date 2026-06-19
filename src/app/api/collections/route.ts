@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import {
-  listCollections,
-  createCollection,
-  countUncollected,
-} from "@/lib/collections";
+import { listCollections, createCollection } from "@/lib/collections";
 
 async function requireUser() {
   const supabase = await createClient();
@@ -21,11 +17,8 @@ export async function GET() {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   try {
-    const [collections, uncollectedCount] = await Promise.all([
-      listCollections(supabase),
-      countUncollected(supabase),
-    ]);
-    return NextResponse.json({ collections, uncollectedCount, userId: user.id });
+    const collections = await listCollections(supabase);
+    return NextResponse.json({ collections, userId: user.id });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
     return NextResponse.json({ error: message }, { status: 500 });

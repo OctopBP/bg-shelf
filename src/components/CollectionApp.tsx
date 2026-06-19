@@ -15,6 +15,11 @@ import {
   IconTrash,
   IconShare3,
   IconFolderSymlink,
+  IconChecks,
+  IconCircleCheckFilled,
+  IconWorld,
+  IconUsers,
+  IconLock,
 } from "@tabler/icons-react";
 import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
@@ -24,7 +29,21 @@ import ConfirmDialog from "./ConfirmDialog";
 import MoveGameDialog from "./MoveGameDialog";
 import AddGamesDialog, { type ResolvedGame } from "./AddGamesDialog";
 import { colorAt, colorForKey } from "@/lib/palette";
-import { UNCOLLECTED, type CollectionRole, type CollectionSummary } from "@/lib/collections";
+import type {
+  CollectionRole,
+  CollectionSummary,
+  CollectionVisibility,
+} from "@/lib/collections";
+
+const VISIBILITY_OPTIONS: {
+  value: CollectionVisibility;
+  label: string;
+  Icon: typeof IconWorld;
+}[] = [
+  { value: "public", label: "Видна всем", Icon: IconWorld },
+  { value: "friends", label: "Только друзьям", Icon: IconUsers },
+  { value: "private", label: "Только мне", Icon: IconLock },
+];
 
 interface CollectionGame {
   id: string;
@@ -42,6 +61,15 @@ interface CollectionGame {
 }
 
 const ALL = "all";
+
+/** Русское склонение слова «игра» по числу: 1 игру, 2 игры, 5 игр. */
+function pluralGames(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "игру";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "игры";
+  return "игр";
+}
 
 // Быстрые фильтры по данным BGG — применяются в связке (И) с фильтром по тегам.
 interface QuickFilter {
@@ -66,7 +94,6 @@ const QUICK_FILTERS: QuickFilter[] = [
 
 export default function CollectionApp() {
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
-  const [uncollectedCount, setUncollectedCount] = useState(0);
   const [userId, setUserId] = useState("");
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string>(ALL);
@@ -83,44 +110,45 @@ export default function CollectionApp() {
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [moving, setMoving] = useState<CollectionGame | null>(null);
+  // Режим выбора нескольких игр для пакетного перемещения.
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkMoving, setBulkMoving] = useState(false);
   const [proposal, setProposal] = useState<ResolvedGame[] | null>(null);
   // Растёт с каждым новым предложением — служит key, чтобы окно добавления
   // пересоздавалось с чистым состоянием, а не переиспользовало прежнее.
   const [proposalSeq, setProposalSeq] = useState(0);
 
   const isAllView = activeId === ALL;
-  const isUncollected = activeId === UNCOLLECTED;
   const activeCollection = collections.find((c) => c.id === activeId);
   const role: CollectionRole | undefined = activeCollection?.role;
-  // «Без коллекции» — личные игры пользователя, всегда редактируемые.
-  const canEdit = isUncollected || role === "owner" || role === "editor";
+  const canEdit = role === "owner" || role === "editor";
   const isOwner = role === "owner";
+  // Коллекция по умолчанию — сюда уходят игры, добавленные в сводном виде.
+  const defaultCollection =
+    collections.find((c) => c.isDefault) ?? collections[0];
   // Коллекции, в которые пользователь вправе перемещать игры.
   const editableCollections = collections.filter(
     (c) => c.role === "owner" || c.role === "editor"
   );
   // Можно ли редактировать конкретную игру (важно в сводном виде «Все игры»).
   const canEditGame = (game: CollectionGame) => {
-    if (game.collectionId === UNCOLLECTED) return true;
     const c = collections.find((x) => x.id === game.collectionId);
     return c?.role === "owner" || c?.role === "editor";
   };
 
   const loadCollections = useCallback(async (selectId?: string) => {
     const res = await fetch("/api/collections");
-    const data = res.ok
-      ? await res.json()
-      : { collections: [], uncollectedCount: 0, userId: "" };
+    const data = res.ok ? await res.json() : { collections: [], userId: "" };
     const list = (data.collections as CollectionSummary[]) ?? [];
     setCollections(list);
-    setUncollectedCount(data.uncollectedCount ?? 0);
     setUserId(data.userId ?? "");
     setCollectionsLoaded(true);
     setActiveId((prev) => {
       if (selectId) return selectId;
-      if (prev === ALL || prev === UNCOLLECTED) return prev;
+      if (prev === ALL) return prev;
       if (list.some((c) => c.id === prev)) return prev;
-      return list[0]?.id ?? UNCOLLECTED;
+      return list[0]?.id ?? ALL;
     });
   }, []);
 
@@ -139,6 +167,8 @@ export default function CollectionApp() {
     setGames((data.games as CollectionGame[]) ?? []);
     setTagFilter(null);
     setQuickFilter(null);
+    setSelecting(false);
+    setSelectedIds(new Set());
     setLoaded(true);
   }, [activeId, isAllView]);
 
@@ -148,9 +178,10 @@ export default function CollectionApp() {
     loadGames();
   }, [collectionsLoaded, loadGames]);
 
-  // Куда применять команды/фото. В сводном виде «Все игры» — «Без коллекции».
-  const commandTarget = isAllView ? UNCOLLECTED : activeId;
-  const canRunCommands = isAllView || canEdit;
+  // Куда применять команды/фото. В сводном виде «Все игры» — в коллекцию
+  // по умолчанию.
+  const commandTarget = isAllView ? (defaultCollection?.id ?? "") : activeId;
+  const canRunCommands = isAllView ? !!defaultCollection : canEdit;
 
   async function runCommand(text: string) {
     if (!text.trim() || busy || !canRunCommands) return;
@@ -189,21 +220,69 @@ export default function CollectionApp() {
     }
   }
 
-  async function moveGame(targetId: string) {
-    const game = moving;
-    setMoving(null);
-    if (!game || targetId === game.collectionId) return;
+  // Перемещает список игр в существующую коллекцию.
+  async function moveItemsTo(
+    items: { fromCollectionId: string; bggId: number }[],
+    targetId: string
+  ) {
+    const toMove = items.filter((i) => i.fromCollectionId !== targetId);
+    if (toMove.length === 0) return;
     await fetch("/api/collection", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fromCollectionId: game.collectionId,
-        toCollectionId: targetId,
-        bggId: game.bggId,
-      }),
+      body: JSON.stringify({ toCollectionId: targetId, items: toMove }),
     });
     loadGames();
     loadCollections(activeId);
+  }
+
+  // Создаёт новую коллекцию и перемещает в неё указанные игры.
+  async function createAndMoveItemsTo(
+    items: { fromCollectionId: string; bggId: number }[],
+    name: string
+  ) {
+    const res = await fetch("/api/collections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.collection) {
+      setStatus(data.error ?? "Не удалось создать коллекцию");
+      return;
+    }
+    await moveItemsTo(items, data.collection.id);
+  }
+
+  function gameToItem(g: CollectionGame) {
+    return { fromCollectionId: g.collectionId, bggId: g.bggId };
+  }
+
+  async function updateVisibility(visibility: CollectionVisibility) {
+    if (!activeCollection || activeCollection.visibility === visibility) return;
+    setCollections((prev) =>
+      prev.map((c) => (c.id === activeId ? { ...c, visibility } : c))
+    );
+    await fetch(`/api/collections/${activeId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility }),
+    });
+    loadCollections(activeId);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelection() {
+    setSelecting(false);
+    setSelectedIds(new Set());
   }
 
   async function removeGame(game: CollectionGame) {
@@ -244,6 +323,10 @@ export default function CollectionApp() {
 
   function requestDeleteCollection() {
     if (!activeCollection) return;
+    if (activeCollection.isDefault) {
+      setStatus("Нельзя удалить коллекцию по умолчанию.");
+      return;
+    }
     if (collections.length <= 1) {
       setStatus("Нельзя удалить единственную коллекцию.");
       return;
@@ -311,19 +394,6 @@ export default function CollectionApp() {
         })}
         {collectionsLoaded && (
           <button
-            onClick={() => setActiveId(UNCOLLECTED)}
-            style={
-              isUncollected
-                ? { backgroundColor: "#fff", borderColor: "#fff", color: "#0d0d0d" }
-                : { borderColor: "#fff", color: "#fff" }
-            }
-            className="rounded-full border-[3px] border-dashed px-3.5 py-1.5 text-sm font-bold transition"
-          >
-            Без коллекции · {uncollectedCount}
-          </button>
-        )}
-        {collectionsLoaded && (
-          <button
             onClick={() => setActiveId(ALL)}
             style={
               isAllView
@@ -356,12 +426,36 @@ export default function CollectionApp() {
               <button onClick={() => setSharing(true)} className="btn btn-ghost px-3 py-1.5">
                 <IconShare3 size={16} className="mr-1" /> Поделиться
               </button>
-              <button
-                onClick={requestDeleteCollection}
-                className="btn btn-ghost px-3 py-1.5 hover:text-coral"
-              >
-                <IconTrash size={16} className="mr-1" /> Удалить
-              </button>
+              {!activeCollection.isDefault && (
+                <button
+                  onClick={requestDeleteCollection}
+                  className="btn btn-ghost px-3 py-1.5 hover:text-coral"
+                >
+                  <IconTrash size={16} className="mr-1" /> Удалить
+                </button>
+              )}
+              {/* Видимость коллекции */}
+              <div className="flex items-center gap-1 rounded-full border-2 border-ink/15 p-1">
+                {VISIBILITY_OPTIONS.map(({ value, label, Icon }) => {
+                  const active = activeCollection.visibility === value;
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => updateVisibility(value)}
+                      title={label}
+                      aria-pressed={active}
+                      className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold transition ${
+                        active
+                          ? "bg-ink text-white"
+                          : "text-ink/55 hover:text-ink"
+                      }`}
+                    >
+                      <Icon size={14} stroke={2.5} />
+                      <span className="hidden sm:inline">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </>
           )}
           {!isOwner && (
@@ -374,13 +468,7 @@ export default function CollectionApp() {
         </div>
       )}
 
-      {isUncollected && (
-        <p className="text-sm text-muted">
-          Игры, не добавленные ни в одну коллекцию.
-        </p>
-      )}
-
-      {/* Панель команд — при правах на изменение, а в «Все игры» добавляет «Без коллекции» */}
+      {/* Панель команд — при правах на изменение; в «Все игры» добавляет в коллекцию по умолчанию */}
       {canRunCommands && (
         <div
           className="flex items-center gap-2"
@@ -492,6 +580,39 @@ export default function CollectionApp() {
         </div>
       )}
 
+      {/* Выбор нескольких игр для перемещения */}
+      {loaded && collectionsLoaded && visibleGames.some(canEditGame) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {!selecting ? (
+            <button
+              onClick={() => setSelecting(true)}
+              className="btn btn-ghost px-3 py-1.5 text-sm"
+            >
+              <IconChecks size={16} className="mr-1" /> Выбрать несколько
+            </button>
+          ) : (
+            <>
+              <span className="text-sm font-bold text-ink">
+                Выбрано: {selectedIds.size}
+              </span>
+              <button
+                onClick={() => setBulkMoving(true)}
+                disabled={selectedIds.size === 0}
+                className="btn btn-brand px-4 py-1.5 text-sm disabled:opacity-50"
+              >
+                <IconFolderSymlink size={16} className="mr-1" /> Переместить
+              </button>
+              <button
+                onClick={exitSelection}
+                className="btn btn-ghost px-3 py-1.5 text-sm"
+              >
+                Отмена
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Сетка игр */}
       {!loaded || !collectionsLoaded ? (
         <p className="py-16 text-center font-semibold text-muted">Загрузка…</p>
@@ -506,22 +627,45 @@ export default function CollectionApp() {
           </div>
           <p className="font-medium text-ink/70">
             {games.length === 0
-              ? isUncollected
-                ? "Здесь появятся игры, не добавленные ни в одну коллекцию."
-                : canEdit
-                  ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
-                  : "В этой коллекции пока нет игр."
+              ? canEdit
+                ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
+                : "В этой коллекции пока нет игр."
               : "Нет игр по выбранному фильтру."}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {visibleGames.map((game, i) => (
+          {visibleGames.map((game, i) => {
+            const editable = canEditGame(game);
+            const selected = selectedIds.has(game.id);
+            const selectMode = selecting && editable;
+            return (
             <div
               key={game.id}
               style={{ "--ring": colorAt(i) } as React.CSSProperties}
-              className="tile group relative overflow-hidden"
+              onClickCapture={
+                selecting
+                  ? (e) => {
+                      e.preventDefault();
+                      if (editable) toggleSelected(game.id);
+                    }
+                  : undefined
+              }
+              className={`tile group relative overflow-hidden ${
+                selectMode ? "cursor-pointer" : ""
+              } ${selected ? "ring-4 ring-brand" : ""} ${
+                selecting && !editable ? "opacity-40" : ""
+              }`}
             >
+              {selectMode && (
+                <div className="absolute left-2 top-2 z-10">
+                  {selected ? (
+                    <IconCircleCheckFilled size={26} className="text-brand" />
+                  ) : (
+                    <span className="block h-[22px] w-[22px] rounded-full border-[3px] border-ink bg-white/80" />
+                  )}
+                </div>
+              )}
               <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
                 <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
                   {game.thumbnailUrl ? (
@@ -578,7 +722,7 @@ export default function CollectionApp() {
                   </div>
                 )}
               </div>
-              {canEditGame(game) && (
+              {editable && !selecting && (
                 <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
                   <button
                     onClick={() => setMoving(game)}
@@ -599,7 +743,8 @@ export default function CollectionApp() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -645,11 +790,44 @@ export default function CollectionApp() {
 
       {moving && (
         <MoveGameDialog
-          gameName={moving.name}
+          subject={`«${moving.name}»`}
           currentCollectionId={moving.collectionId}
           collections={editableCollections}
-          onMove={moveGame}
+          onMove={(targetId) => {
+            const g = moving;
+            setMoving(null);
+            moveItemsTo([gameToItem(g)], targetId);
+          }}
+          onCreateAndMove={async (name) => {
+            const g = moving;
+            setMoving(null);
+            await createAndMoveItemsTo([gameToItem(g)], name);
+          }}
           onClose={() => setMoving(null)}
+        />
+      )}
+
+      {bulkMoving && (
+        <MoveGameDialog
+          subject={`${selectedIds.size} ${pluralGames(selectedIds.size)}`}
+          collections={editableCollections}
+          onMove={(targetId) => {
+            const items = games
+              .filter((g) => selectedIds.has(g.id) && canEditGame(g))
+              .map(gameToItem);
+            setBulkMoving(false);
+            exitSelection();
+            moveItemsTo(items, targetId);
+          }}
+          onCreateAndMove={async (name) => {
+            const items = games
+              .filter((g) => selectedIds.has(g.id) && canEditGame(g))
+              .map(gameToItem);
+            setBulkMoving(false);
+            exitSelection();
+            await createAndMoveItemsTo(items, name);
+          }}
+          onClose={() => setBulkMoving(false)}
         />
       )}
 

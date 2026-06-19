@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     if (!collectionId) {
       return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
     }
-    const games = await listCollection(supabase, collectionId, user.id);
+    const games = await listCollection(supabase, collectionId);
     return NextResponse.json({ games });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -103,7 +103,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await removeGameFromCollection(supabase, collectionId, bggId, user.id);
+    await removeGameFromCollection(supabase, collectionId, bggId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -111,7 +111,10 @@ export async function DELETE(request: Request) {
   }
 }
 
-/** Перемещение игры между коллекциями (и «Без коллекции»). */
+/** Перемещение игр между коллекциями. Поддерживает одну игру
+ *  ({ fromCollectionId, bggId }) или несколько за раз
+ *  ({ items: [{ fromCollectionId, bggId }] }). В обоих случаях нужна
+ *  целевая коллекция toCollectionId. */
 export async function PUT(request: Request) {
   const supabase = await createClient();
   const {
@@ -122,34 +125,40 @@ export async function PUT(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const fromCollectionId = body?.fromCollectionId;
   const toCollectionId = body?.toCollectionId;
-  if (
-    typeof fromCollectionId !== "string" ||
-    !fromCollectionId ||
-    typeof toCollectionId !== "string" ||
-    !toCollectionId
-  ) {
+  if (typeof toCollectionId !== "string" || !toCollectionId) {
     return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
   }
-  const bggId = Number(body?.bggId);
-  if (!bggId) {
-    return NextResponse.json({ error: "Не указан bggId" }, { status: 400 });
+
+  // Нормализуем вход в список { fromCollectionId, bggId }.
+  const rawItems: Array<{ fromCollectionId?: unknown; bggId?: unknown }> =
+    Array.isArray(body?.items)
+      ? body.items
+      : [{ fromCollectionId: body?.fromCollectionId, bggId: body?.bggId }];
+
+  const moves = rawItems
+    .map((it) => ({
+      from: typeof it.fromCollectionId === "string" ? it.fromCollectionId : "",
+      bggId: Number(it.bggId),
+    }))
+    .filter((m) => m.from && m.bggId);
+
+  if (moves.length === 0) {
+    return NextResponse.json({ error: "Нечего перемещать" }, { status: 400 });
   }
 
-  try {
-    await moveGameToCollection(
-      supabase,
-      fromCollectionId,
-      toCollectionId,
-      bggId,
-      user.id
-    );
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Неизвестная ошибка";
-    return NextResponse.json({ error: message }, { status: 500 });
+  const moved: number[] = [];
+  const failed: number[] = [];
+  for (const m of moves) {
+    try {
+      await moveGameToCollection(supabase, m.from, toCollectionId, m.bggId, user.id);
+      moved.push(m.bggId);
+    } catch {
+      failed.push(m.bggId);
+    }
   }
+
+  return NextResponse.json({ moved, failed });
 }
 
 export async function PATCH(request: Request) {
@@ -192,7 +201,7 @@ export async function PATCH(request: Request) {
       await updateCollectionItem(supabase, collectionId, bggId, {
         tags,
         notes: notes === undefined ? undefined : notes || null,
-      }, user.id);
+      });
     }
     if (info) {
       await updateGameInfo(supabase, bggId, info);

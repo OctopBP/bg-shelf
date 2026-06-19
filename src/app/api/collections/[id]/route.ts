@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { renameCollection, deleteCollection } from "@/lib/collections";
+import {
+  renameCollection,
+  deleteCollection,
+  setCollectionVisibility,
+  type CollectionVisibility,
+} from "@/lib/collections";
+
+const VISIBILITIES: CollectionVisibility[] = ["public", "friends", "private"];
 
 async function requireUser() {
   const supabase = await createClient();
@@ -10,7 +17,7 @@ async function requireUser() {
   return { supabase, user };
 }
 
-/** Переименовать коллекцию (RLS разрешает только владельцу). */
+/** Обновить коллекцию: название и/или видимость (RLS — только владельцу). */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -21,12 +28,29 @@ export async function PATCH(
   }
   const { id } = await params;
   const body = await request.json().catch(() => null);
-  const name = typeof body?.name === "string" ? body.name.trim() : "";
-  if (!name) {
+
+  const name =
+    body?.name === undefined ? undefined : String(body.name ?? "").trim();
+  const visibility =
+    body?.visibility === undefined
+      ? undefined
+      : (body.visibility as CollectionVisibility);
+
+  if (name !== undefined && !name) {
     return NextResponse.json({ error: "Не указано название" }, { status: 400 });
   }
+  if (visibility !== undefined && !VISIBILITIES.includes(visibility)) {
+    return NextResponse.json({ error: "Недопустимая видимость" }, { status: 400 });
+  }
+  if (name === undefined && visibility === undefined) {
+    return NextResponse.json({ error: "Нечего обновлять" }, { status: 400 });
+  }
+
   try {
-    await renameCollection(supabase, id, name);
+    if (name !== undefined) await renameCollection(supabase, id, name);
+    if (visibility !== undefined) {
+      await setCollectionVisibility(supabase, id, visibility);
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
