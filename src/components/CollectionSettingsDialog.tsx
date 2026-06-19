@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ComponentType } from "react";
-import { IconLoader2, IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconLoader2, IconTrash } from "@tabler/icons-react";
 import Modal from "./Modal";
 import RoleSegmentedControl from "./RoleSegmentedControl";
 import type {
@@ -11,6 +11,7 @@ import type {
   CollectionSummary,
   CollectionVisibility,
 } from "@/lib/collections";
+import type { Friend } from "@/lib/friends";
 
 type InviteRole = Exclude<CollectionRole, "owner">;
 
@@ -52,7 +53,8 @@ export default function CollectionSettingsDialog({
 
   const [members, setMembers] = useState<CollectionMember[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [email, setEmail] = useState("");
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [invited, setInvited] = useState<Set<string>>(new Set());
   const [role, setRole] = useState<InviteRole>("editor");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -69,6 +71,34 @@ export default function CollectionSettingsDialog({
     loadMembers();
   }, [loadMembers]);
 
+  useEffect(() => {
+    let active = true;
+    fetch("/api/friends")
+      .then((res) => (res.ok ? res.json() : { friends: [] }))
+      .then((data) => {
+        if (active) setFriends((data.friends as Friend[]) ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function toggleFriend(userId: string) {
+    setInvited((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }
+
+  // Друзья, которые ещё не участвуют в коллекции — их можно пригласить.
+  const memberIds = new Set(members.map((m) => m.userId));
+  const invitable = friends.filter((f) => !memberIds.has(f.userId));
+  // Ник друга по его userId — чтобы показывать участников по нику.
+  const usernameById = new Map(friends.map((f) => [f.userId, f.username]));
+
   function saveName() {
     const trimmed = name.trim();
     if (!trimmed || trimmed === collection.name) return;
@@ -77,18 +107,23 @@ export default function CollectionSettingsDialog({
 
   async function invite(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim() || busy) return;
+    if (invited.size === 0 || busy) return;
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/collections/${collectionId}/members`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), role }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Не удалось поделиться");
-      setEmail("");
+      const results = await Promise.allSettled(
+        Array.from(invited).map((userId) =>
+          fetch(`/api/collections/${collectionId}/members`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId, role }),
+          }).then((r) => (r.ok ? r : Promise.reject(new Error()))),
+        ),
+      );
+      if (results.some((r) => r.status === "rejected")) {
+        setError("Не всех друзей удалось пригласить.");
+      }
+      setInvited(new Set());
       await loadMembers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -163,34 +198,58 @@ export default function CollectionSettingsDialog({
 
         {/* Доступ участникам */}
         <div className="space-y-3">
-          <p className="text-sm font-bold text-ink/70">Доступ по email</p>
-          <form onSubmit={invite} className="space-y-2">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="email пользователя"
-              disabled={busy}
-              className="field w-full rounded-full px-4 py-2.5 text-sm"
-            />
-            <RoleSegmentedControl
-              value={role}
-              onChange={setRole}
-              disabled={busy}
-              aria-label="Уровень доступа"
-            />
-            <button
-              type="submit"
-              disabled={busy || !email.trim()}
-              className="btn btn-brand w-full px-5 py-2.5"
-            >
-              {busy ? (
-                <IconLoader2 size={18} className="animate-spin" />
-              ) : (
-                "Дать доступ"
+          <p className="text-sm font-bold text-ink/70">Поделиться с друзьями</p>
+          {invitable.length > 0 ? (
+            <form onSubmit={invite} className="space-y-2">
+              <div className="flex max-h-40 flex-col gap-2 overflow-y-auto">
+                {invitable.map((f) => {
+                  const active = invited.has(f.userId);
+                  return (
+                    <button
+                      key={f.userId}
+                      type="button"
+                      onClick={() => toggleFriend(f.userId)}
+                      disabled={busy}
+                      aria-pressed={active}
+                      className={`flex items-center justify-between gap-2 rounded-full border-2 px-4 py-2 text-sm font-bold transition ${
+                        active
+                          ? "border-ink bg-ink text-white"
+                          : "border-ink/15 bg-black/[0.04] text-ink hover:bg-black/[0.08]"
+                      }`}
+                    >
+                      <span className="truncate">@{f.username}</span>
+                      {active && <IconCheck size={16} stroke={2.5} />}
+                    </button>
+                  );
+                })}
+              </div>
+              {invited.size > 0 && (
+                <RoleSegmentedControl
+                  value={role}
+                  onChange={setRole}
+                  disabled={busy}
+                  aria-label="Уровень доступа"
+                />
               )}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={busy || invited.size === 0}
+                className="btn btn-brand w-full px-5 py-2.5"
+              >
+                {busy ? (
+                  <IconLoader2 size={18} className="animate-spin" />
+                ) : (
+                  "Дать доступ"
+                )}
+              </button>
+            </form>
+          ) : (
+            <p className="text-sm text-muted">
+              {friends.length > 0
+                ? "Все ваши друзья уже участвуют в коллекции."
+                : "Добавьте друзей, чтобы делиться коллекциями."}
+            </p>
+          )}
 
           {error && (
             <p className="rounded-2xl border-2 border-coral bg-coral/10 px-3 py-2 text-sm font-medium text-ink">
@@ -210,7 +269,9 @@ export default function CollectionSettingsDialog({
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-ink">
-                        {m.email ?? m.userId}
+                        {usernameById.has(m.userId)
+                          ? `@${usernameById.get(m.userId)}`
+                          : (m.email ?? m.userId)}
                         {m.userId === currentUserId ? " (вы)" : ""}
                       </p>
                       <p className="text-xs font-medium text-ink/55">
