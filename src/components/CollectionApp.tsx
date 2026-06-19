@@ -3,21 +3,21 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  IconMessage2,
   IconArrowRight,
-  IconLoader2,
-  IconDice5Filled,
-  IconSearch,
-  IconStarFilled,
-  IconX,
-  IconPlus,
-  IconSettings,
-  IconFolderSymlink,
   IconChecks,
   IconCircleCheckFilled,
-  IconWorld,
-  IconUsers,
+  IconDice5Filled,
+  IconFolderSymlink,
+  IconLoader2,
   IconLock,
+  IconMessage2,
+  IconPlus,
+  IconSearch,
+  IconSettings,
+  IconStarFilled,
+  IconUsers,
+  IconWorld,
+  IconX,
 } from "@tabler/icons-react";
 import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
@@ -33,6 +33,7 @@ import type {
   CollectionSummary,
   CollectionVisibility,
 } from "@/lib/collections";
+import ProgressiveImage from "./ProgressiveImage";
 
 const VISIBILITY_OPTIONS: {
   value: CollectionVisibility;
@@ -67,7 +68,9 @@ function pluralGames(n: number): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
   if (mod10 === 1 && mod100 !== 11) return "игру";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "игры";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return "игры";
+  }
   return "игр";
 }
 
@@ -79,7 +82,10 @@ interface QuickFilter {
 }
 
 const supports = (g: CollectionGame, n: number) =>
-  g.minPlayers != null && g.maxPlayers != null && g.minPlayers <= n && g.maxPlayers >= n;
+  g.minPlayers != null &&
+  g.maxPlayers != null &&
+  g.minPlayers <= n &&
+  g.maxPlayers >= n;
 
 const QUICK_FILTERS: QuickFilter[] = [
   { key: "solo", label: "соло", test: (g) => supports(g, 1) },
@@ -129,7 +135,7 @@ export default function CollectionApp() {
     collections.find((c) => c.isDefault) ?? collections[0];
   // Коллекции, в которые пользователь вправе перемещать игры.
   const editableCollections = collections.filter(
-    (c) => c.role === "owner" || c.role === "editor"
+    (c) => c.role === "owner" || c.role === "editor",
   );
   // Можно ли редактировать конкретную игру (важно в сводном виде «Все игры»).
   const canEditGame = (game: CollectionGame) => {
@@ -191,7 +197,10 @@ export default function CollectionApp() {
       const res = await fetch("/api/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: text, collectionId: commandTarget }),
+        body: JSON.stringify({
+          command: text,
+          collectionId: commandTarget,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Ошибка");
@@ -224,7 +233,7 @@ export default function CollectionApp() {
   // Перемещает список игр в существующую коллекцию.
   async function moveItemsTo(
     items: { fromCollectionId: string; bggId: number }[],
-    targetId: string
+    targetId: string,
   ) {
     const toMove = items.filter((i) => i.fromCollectionId !== targetId);
     if (toMove.length === 0) return;
@@ -240,7 +249,7 @@ export default function CollectionApp() {
   // Создаёт новую коллекцию и перемещает в неё указанные игры.
   async function createAndMoveItemsTo(
     items: { fromCollectionId: string; bggId: number }[],
-    name: string
+    name: string,
   ) {
     const res = await fetch("/api/collections", {
       method: "POST",
@@ -260,9 +269,11 @@ export default function CollectionApp() {
   }
 
   async function updateVisibility(visibility: CollectionVisibility) {
-    if (!activeCollection || activeCollection.visibility === visibility) return;
+    if (!activeCollection || activeCollection.visibility === visibility) {
+      return;
+    }
     setCollections((prev) =>
-      prev.map((c) => (c.id === activeId ? { ...c, visibility } : c))
+      prev.map((c) => (c.id === activeId ? { ...c, visibility } : c)),
     );
     await fetch(`/api/collections/${activeId}`, {
       method: "PATCH",
@@ -290,7 +301,10 @@ export default function CollectionApp() {
     await fetch("/api/collection", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ collectionId: game.collectionId, bggId: game.bggId }),
+      body: JSON.stringify({
+        collectionId: game.collectionId,
+        bggId: game.bggId,
+      }),
     });
     loadGames();
     loadCollections(activeId);
@@ -300,7 +314,7 @@ export default function CollectionApp() {
     name: string,
     visibility: CollectionVisibility,
     friendIds: string[],
-    role: Exclude<CollectionRole, "owner">
+    role: Exclude<CollectionRole, "owner">,
   ) {
     setCreating(false);
     const res = await fetch("/api/collections", {
@@ -317,8 +331,8 @@ export default function CollectionApp() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ userId, role }),
-            }).then((r) => (r.ok ? r : Promise.reject(new Error())))
-          )
+            }).then((r) => (r.ok ? r : Promise.reject(new Error()))),
+          ),
         );
         if (results.some((r) => r.status === "rejected")) {
           setStatus("Коллекция создана, но не всех друзей удалось пригласить.");
@@ -362,13 +376,13 @@ export default function CollectionApp() {
 
   const allTags = useMemo(
     () => Array.from(new Set(games.flatMap((g) => g.tags))).sort(),
-    [games]
+    [games],
   );
 
   // Показываем только те быстрые фильтры, под которые есть хотя бы одна игра.
   const quickFilters = useMemo(
     () => QUICK_FILTERS.filter((f) => games.some(f.test)),
-    [games]
+    [games],
   );
 
   const activeQuick = quickFilter
@@ -380,9 +394,9 @@ export default function CollectionApp() {
       games.filter(
         (g) =>
           (!tagFilter || g.tags.includes(tagFilter)) &&
-          (!activeQuick || activeQuick.test(g))
+          (!activeQuick || activeQuick.test(g)),
       ),
-    [games, tagFilter, activeQuick]
+    [games, tagFilter, activeQuick],
   );
 
   return (
@@ -392,12 +406,16 @@ export default function CollectionApp() {
     >
       {/* Вкладки коллекций */}
       <div className="flex flex-wrap items-center gap-2">
-      {collectionsLoaded && (
+        {collectionsLoaded && (
           <button
             onClick={() => setActiveId(ALL)}
             style={
               isAllView
-                ? { backgroundColor: "#fff", borderColor: "#fff", color: "#0d0d0d" }
+                ? {
+                    backgroundColor: "#fff",
+                    borderColor: "#fff",
+                    color: "#0d0d0d",
+                  }
                 : { borderColor: "#fff", color: "#fff" }
             }
             className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
@@ -423,7 +441,11 @@ export default function CollectionApp() {
               }}
               style={
                 active
-                  ? { backgroundColor: col, borderColor: col, color: "#0d0d0d" }
+                  ? {
+                      backgroundColor: col,
+                      borderColor: col,
+                      color: "#0d0d0d",
+                    }
                   : { borderColor: col, color: col }
               }
               className="group relative inline-flex items-center rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
@@ -453,7 +475,11 @@ export default function CollectionApp() {
                   }}
                   aria-label={`Настройки коллекции «${c.name}»`}
                   title="Настройки коллекции"
-                  style={{ "--badge": col } as React.CSSProperties}
+                  style={
+                    {
+                      "--badge": col,
+                    } as React.CSSProperties
+                  }
                   className="absolute right-1 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full transition-colors hover:bg-(--badge) hover:text-[#0d0d0d] group-hover:flex"
                 >
                   <IconSettings size={16} stroke={2.5} />
@@ -502,7 +528,11 @@ export default function CollectionApp() {
                 onClick={() => setQuickFilter(active ? null : f.key)}
                 style={
                   active
-                    ? { backgroundColor: c, borderColor: c, color: "#0d0d0d" }
+                    ? {
+                        backgroundColor: c,
+                        borderColor: c,
+                        color: "#0d0d0d",
+                      }
                     : { borderColor: c, color: c }
                 }
                 className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
@@ -521,7 +551,11 @@ export default function CollectionApp() {
             onClick={() => setTagFilter(null)}
             style={
               tagFilter === null
-                ? { backgroundColor: "#fff", borderColor: "#fff", color: "#0d0d0d" }
+                ? {
+                    backgroundColor: "#fff",
+                    borderColor: "#fff",
+                    color: "#0d0d0d",
+                  }
                 : { borderColor: "#fff", color: "#fff" }
             }
             className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
@@ -537,7 +571,11 @@ export default function CollectionApp() {
                 onClick={() => setTagFilter(active ? null : tag)}
                 style={
                   active
-                    ? { backgroundColor: c, borderColor: c, color: "#0d0d0d" }
+                    ? {
+                        backgroundColor: c,
+                        borderColor: c,
+                        color: "#0d0d0d",
+                      }
                     : { borderColor: c, color: c }
                 }
                 className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
@@ -553,45 +591,45 @@ export default function CollectionApp() {
       {loaded &&
         collectionsLoaded &&
         (canRunCommands || visibleGames.some(canEditGame)) && (
-        <div className="flex flex-wrap items-center gap-2">
-          {visibleGames.some(canEditGame) &&
-            (!selecting ? (
-              <button
-                onClick={() => setSelecting(true)}
-                className="btn btn-ghost px-3 py-1.5 text-sm"
-              >
-                <IconChecks size={16} className="mr-1" /> Выбрать несколько
-              </button>
-            ) : (
-              <>
-                <span className="text-sm font-bold text-white">
-                  Выбрано: {selectedIds.size}
-                </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {visibleGames.some(canEditGame) &&
+              (!selecting ? (
                 <button
-                  onClick={() => setBulkMoving(true)}
-                  disabled={selectedIds.size === 0}
-                  className="btn btn-brand px-4 py-1.5 text-sm disabled:opacity-50"
-                >
-                  <IconFolderSymlink size={16} className="mr-1" /> Переместить
-                </button>
-                <button
-                  onClick={exitSelection}
+                  onClick={() => setSelecting(true)}
                   className="btn btn-ghost px-3 py-1.5 text-sm"
                 >
-                  Отмена
+                  <IconChecks size={16} className="mr-1" /> Выбрать несколько
                 </button>
-              </>
-            ))}
-          {canRunCommands && !selecting && (
-            <button
-              onClick={() => setAddingGames(true)}
-              className="btn btn-brand ml-auto px-3 py-1.5 text-sm"
-            >
-              <IconPlus size={16} className="mr-1" /> Добавить игры
-            </button>
-          )}
-        </div>
-      )}
+              ) : (
+                <>
+                  <span className="text-sm font-bold text-white">
+                    Выбрано: {selectedIds.size}
+                  </span>
+                  <button
+                    onClick={() => setBulkMoving(true)}
+                    disabled={selectedIds.size === 0}
+                    className="btn btn-brand px-4 py-1.5 text-sm disabled:opacity-50"
+                  >
+                    <IconFolderSymlink size={16} className="mr-1" /> Переместить
+                  </button>
+                  <button
+                    onClick={exitSelection}
+                    className="btn btn-ghost px-3 py-1.5 text-sm"
+                  >
+                    Отмена
+                  </button>
+                </>
+              ))}
+            {canRunCommands && !selecting && (
+              <button
+                onClick={() => setAddingGames(true)}
+                className="btn btn-brand ml-auto px-3 py-1.5 text-sm"
+              >
+                <IconPlus size={16} className="mr-1" /> Добавить игры
+              </button>
+            )}
+          </div>
+        )}
 
       {/* Сетка игр */}
       {!loaded || !collectionsLoaded ? (
@@ -620,109 +658,117 @@ export default function CollectionApp() {
             const selected = selectedIds.has(game.id);
             const selectMode = selecting && editable;
             return (
-            <div
-              key={game.id}
-              style={{ "--ring": colorAt(i) } as React.CSSProperties}
-              onClickCapture={
-                selecting
-                  ? (e) => {
-                      e.preventDefault();
-                      if (editable) toggleSelected(game.id);
-                    }
-                  : undefined
-              }
-              className={`tile group relative overflow-hidden ${
-                selectMode ? "cursor-pointer" : ""
-              } ${selected ? "ring-4 ring-brand" : ""} ${
-                selecting && !editable ? "opacity-40" : ""
-              }`}
-            >
-              {selectMode && (
-                <div className="absolute left-2 top-2 z-10">
-                  {selected ? (
-                    <IconCircleCheckFilled size={26} className="text-brand" />
-                  ) : (
-                    <span className="block h-[22px] w-[22px] rounded-full border-[3px] border-ink bg-white/80" />
-                  )}
-                </div>
-              )}
-              <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
-                <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
-                  {game.imageUrl || game.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={game.imageUrl ?? game.thumbnailUrl ?? ""}
-                      alt={game.name}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-ink/30">
-                      <IconDice5Filled size={48} />
+              <div
+                key={game.id}
+                style={
+                  {
+                    "--ring": colorAt(i),
+                  } as React.CSSProperties
+                }
+                onClickCapture={
+                  selecting
+                    ? (e) => {
+                        e.preventDefault();
+                        if (editable) {
+                          toggleSelected(game.id);
+                        }
+                      }
+                    : undefined
+                }
+                className={`tile group relative overflow-hidden ${
+                  selectMode ? "cursor-pointer" : ""
+                } ${selected ? "ring-4 ring-brand" : ""} ${
+                  selecting && !editable ? "opacity-40" : ""
+                }`}
+              >
+                {selectMode && (
+                  <div className="absolute left-2 top-2 z-10">
+                    {selected ? (
+                      <IconCircleCheckFilled size={26} className="text-brand" />
+                    ) : (
+                      <span className="block h-[22px] w-[22px] rounded-full border-[3px] border-ink bg-white/80" />
+                    )}
+                  </div>
+                )}
+                <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
+                  <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
+                    {game.imageUrl || game.thumbnailUrl ? (
+                      <ProgressiveImage
+                        smallUrl={game.thumbnailUrl}
+                        largeUrl={game.imageUrl}
+                        alt={game.name}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-ink/30">
+                        <IconDice5Filled size={48} />
+                      </div>
+                    )}
+                  </div>
+                </Link>
+                <div className="p-3">
+                  <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
+                    <h3
+                      className="truncate font-bold text-ink hover:text-brand"
+                      title={game.name}
+                    >
+                      {game.name}
+                    </h3>
+                  </Link>
+                  <p className="mt-1 text-xs font-medium text-ink/55">
+                    {game.minPlayers && game.maxPlayers
+                      ? game.minPlayers === game.maxPlayers
+                        ? `${game.minPlayers} игр.`
+                        : `${game.minPlayers}–${game.maxPlayers} игр.`
+                      : ""}
+                    {game.playingTime ? ` · ${game.playingTime} мин` : ""}
+                    {game.rating ? (
+                      <span className="inline-flex items-center gap-0.5 align-middle font-bold text-orange">
+                        {" · "}
+                        <IconStarFilled size={11} />
+                        {Number(game.rating).toFixed(1)}
+                      </span>
+                    ) : (
+                      ""
+                    )}
+                  </p>
+                  {game.tags.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {game.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          style={{
+                            backgroundColor: colorForKey(tag),
+                          }}
+                          className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink"
+                        >
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
-              </Link>
-              <div className="p-3">
-                <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
-                  <h3
-                    className="truncate font-bold text-ink hover:text-brand"
-                    title={game.name}
-                  >
-                    {game.name}
-                  </h3>
-                </Link>
-                <p className="mt-1 text-xs font-medium text-ink/55">
-                  {game.minPlayers && game.maxPlayers
-                    ? game.minPlayers === game.maxPlayers
-                      ? `${game.minPlayers} игр.`
-                      : `${game.minPlayers}–${game.maxPlayers} игр.`
-                    : ""}
-                  {game.playingTime ? ` · ${game.playingTime} мин` : ""}
-                  {game.rating ? (
-                    <span className="inline-flex items-center gap-0.5 align-middle font-bold text-orange">
-                      {" · "}
-                      <IconStarFilled size={11} />
-                      {Number(game.rating).toFixed(1)}
-                    </span>
-                  ) : (
-                    ""
-                  )}
-                </p>
-                {game.tags.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {game.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        style={{ backgroundColor: colorForKey(tag) }}
-                        className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink"
-                      >
-                        {tag}
-                      </span>
-                    ))}
+                {editable && !selecting && (
+                  <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
+                    <button
+                      onClick={() => setMoving(game)}
+                      title="Переместить в другую коллекцию"
+                      aria-label={`Переместить ${game.name}`}
+                      className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-brand hover:text-white"
+                    >
+                      <IconFolderSymlink size={16} stroke={2.5} />
+                    </button>
+                    <button
+                      onClick={() => removeGame(game)}
+                      title="Удалить из коллекции"
+                      aria-label={`Удалить ${game.name}`}
+                      className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white"
+                    >
+                      <IconX size={16} stroke={3} />
+                    </button>
                   </div>
                 )}
               </div>
-              {editable && !selecting && (
-                <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
-                  <button
-                    onClick={() => setMoving(game)}
-                    title="Переместить в другую коллекцию"
-                    aria-label={`Переместить ${game.name}`}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-brand hover:text-white"
-                  >
-                    <IconFolderSymlink size={16} stroke={2.5} />
-                  </button>
-                  <button
-                    onClick={() => removeGame(game)}
-                    title="Удалить из коллекции"
-                    aria-label={`Удалить ${game.name}`}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white"
-                  >
-                    <IconX size={16} stroke={3} />
-                  </button>
-                </div>
-              )}
-            </div>
             );
           })}
         </div>
@@ -744,7 +790,7 @@ export default function CollectionApp() {
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
                 disabled={busy}
-                placeholder='Например: «добавь Каркассон и Манчкин, пометь Манчкин как пати»'
+                placeholder="Например: «добавь Каркассон и Манчкин, пометь Манчкин как пати»"
                 className="field control-h flex-1 rounded-full px-5 text-sm disabled:opacity-50"
               />
               <button
