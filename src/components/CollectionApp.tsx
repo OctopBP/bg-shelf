@@ -25,6 +25,7 @@ import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
 import ShareDialog from "./ShareDialog";
 import PromptDialog from "./PromptDialog";
+import CreateCollectionDialog from "./CreateCollectionDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import MoveGameDialog from "./MoveGameDialog";
 import AddGamesDialog, { type ResolvedGame } from "./AddGamesDialog";
@@ -295,12 +296,12 @@ export default function CollectionApp() {
     loadCollections(activeId);
   }
 
-  async function createCollection(name: string) {
+  async function createCollection(name: string, visibility: CollectionVisibility) {
     setCreating(false);
     const res = await fetch("/api/collections", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, visibility }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.collection) {
@@ -435,7 +436,7 @@ export default function CollectionApp() {
                 </button>
               )}
               {/* Видимость коллекции */}
-              <div className="flex items-center gap-1 rounded-full border-2 border-ink/15 p-1">
+              <div className="flex items-center gap-1 rounded-full border-2 border-white/25 p-1">
                 {VISIBILITY_OPTIONS.map(({ value, label, Icon }) => {
                   const active = activeCollection.visibility === value;
                   return (
@@ -446,8 +447,8 @@ export default function CollectionApp() {
                       aria-pressed={active}
                       className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold transition ${
                         active
-                          ? "bg-ink text-white"
-                          : "text-ink/55 hover:text-ink"
+                          ? "bg-white text-[#0d0d0d]"
+                          : "text-white/60 hover:text-white"
                       }`}
                     >
                       <Icon size={14} stroke={2.5} />
@@ -758,10 +759,8 @@ export default function CollectionApp() {
       )}
 
       {creating && (
-        <PromptDialog
-          title="Новая коллекция"
-          placeholder="Название новой коллекции"
-          confirmLabel="Создать"
+        <CreateCollectionDialog
+          options={VISIBILITY_OPTIONS}
           onSubmit={createCollection}
           onClose={() => setCreating(false)}
         />

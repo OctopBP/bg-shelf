@@ -124,13 +124,19 @@ export async function listCollectionsByOwner(
 
 export async function createCollection(
   supabase: SupabaseClient,
-  name: string
+  name: string,
+  visibility: CollectionVisibility = "public"
 ): Promise<{ id: string; name: string }> {
   const { data, error } = await supabase
     .rpc("create_collection", { name })
     .single();
   if (error) throw new Error(error.message);
   const row = data as { id: string; name: string };
+  // RPC создаёт коллекцию с видимостью по умолчанию (public); если выбрана
+  // другая — проставляем её отдельным апдейтом (RLS разрешает владельцу).
+  if (visibility !== "public") {
+    await setCollectionVisibility(supabase, row.id, visibility);
+  }
   return { id: row.id, name: row.name };
 }
 

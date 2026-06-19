@@ -246,14 +246,33 @@ export async function listCollection(
   return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
 }
 
-/** Все игры из всех доступных пользователю коллекций (сводный вид «Все игры»).
- *  RLS отдаёт только доступные строки. Имя коллекции приходит из joined-select. */
+/** Игры из коллекций самого пользователя (сводный вид «Все игры»).
+ *  Берём только коллекции, в которых пользователь состоит (как и список вкладок),
+ *  иначе RLS отдал бы ещё и чужие публичные коллекции и коллекции друзей.
+ *  Имя коллекции приходит из joined-select. */
 export async function listAllGames(
   supabase: SupabaseClient
 ): Promise<CollectionGame[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Не авторизован");
+
+  const { data: memberships, error: memErr } = await supabase
+    .from("collection_members")
+    .select("collection_id")
+    .eq("user_id", user.id);
+  if (memErr) throw new Error(memErr.message);
+
+  const ids = (memberships ?? []).map(
+    (m) => (m as { collection_id: string }).collection_id
+  );
+  if (ids.length === 0) return [];
+
   const { data, error } = await supabase
     .from("collection_items")
     .select("id, collection_id, bgg_id, tags, notes, added_at, games(*), collections(name)")
+    .in("collection_id", ids)
     .order("added_at", { ascending: false });
   if (error) throw new Error(error.message);
 

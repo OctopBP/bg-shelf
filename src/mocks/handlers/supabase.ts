@@ -167,6 +167,11 @@ const restHandlers = [
       collectionId !== undefined
         ? selectItems(collectionId)
         : selectAllItems(DEMO_USER.id);
+    // Сводный вид «Все игры» приходит с ?collection_id=in.(…) — ограничиваем
+    // указанными коллекциями пользователя.
+    if (inList) {
+      rows = rows.filter((r) => inList.includes(String(r.collection_id)));
+    }
     if (bggId !== undefined) {
       rows = rows.filter((r) => r.bgg_id === Number(bggId));
     }
@@ -226,6 +231,15 @@ const restHandlers = [
 
     if (select.includes("collections")) {
       return HttpResponse.json(selectMemberships(userId));
+    }
+
+    // Список collection_id коллекций пользователя (сводный вид «Все игры»).
+    if (select.includes("collection_id")) {
+      return HttpResponse.json(
+        selectMemberships(userId)
+          .filter((m) => m.collections)
+          .map((m) => ({ collection_id: m.collections!.id }))
+      );
     }
 
     const rows = selectMemberships(userId)

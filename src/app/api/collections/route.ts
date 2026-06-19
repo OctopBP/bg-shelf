@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { listCollections, createCollection } from "@/lib/collections";
+import {
+  listCollections,
+  createCollection,
+  type CollectionVisibility,
+} from "@/lib/collections";
+
+const VISIBILITIES: CollectionVisibility[] = ["public", "friends", "private"];
 
 async function requireUser() {
   const supabase = await createClient();
@@ -36,8 +42,11 @@ export async function POST(request: Request) {
   if (!name) {
     return NextResponse.json({ error: "Не указано название" }, { status: 400 });
   }
+  const visibility: CollectionVisibility = VISIBILITIES.includes(body?.visibility)
+    ? body.visibility
+    : "public";
   try {
-    const collection = await createCollection(supabase, name);
+    const collection = await createCollection(supabase, name, visibility);
     return NextResponse.json({ collection });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
