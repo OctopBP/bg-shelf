@@ -474,9 +474,9 @@ export default function VoiceInput({ onTranscript, disabled }: VoiceInputProps) 
         disabled={disabled || open}
         title="Голосовая команда"
         aria-label="Голосовая команда"
-        className="icon-btn h-10 w-10"
+        className="icon-btn control-h w-12 shrink-0"
       >
-        <IconMicrophone size={20} />
+        <IconMicrophone size={22} />
       </button>
 
       {open && (
