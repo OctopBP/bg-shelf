@@ -181,7 +181,7 @@ export default function CollectionApp() {
   // Куда применять команды/фото. В сводном виде «Все игры» — в коллекцию
   // по умолчанию.
   const commandTarget = isAllView ? (defaultCollection?.id ?? "") : activeId;
-  const canRunCommands = isAllView ? !!defaultCollection : canEdit;
+  const canRunCommands = canEdit;
 
   async function runCommand(text: string) {
     if (!text.trim() || busy || !canRunCommands) return;
