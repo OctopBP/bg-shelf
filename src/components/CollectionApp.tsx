@@ -296,7 +296,12 @@ export default function CollectionApp() {
     loadCollections(activeId);
   }
 
-  async function createCollection(name: string, visibility: CollectionVisibility) {
+  async function createCollection(
+    name: string,
+    visibility: CollectionVisibility,
+    friendIds: string[],
+    role: Exclude<CollectionRole, "owner">
+  ) {
     setCreating(false);
     const res = await fetch("/api/collections", {
       method: "POST",
@@ -305,6 +310,20 @@ export default function CollectionApp() {
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.collection) {
+      if (friendIds.length > 0) {
+        const results = await Promise.allSettled(
+          friendIds.map((userId) =>
+            fetch(`/api/collections/${data.collection.id}/members`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, role }),
+            }).then((r) => (r.ok ? r : Promise.reject(new Error())))
+          )
+        );
+        if (results.some((r) => r.status === "rejected")) {
+          setStatus("Коллекция создана, но не всех друзей удалось пригласить.");
+        }
+      }
       await loadCollections(data.collection.id);
     } else {
       setStatus(data.error ?? "Не удалось создать коллекцию");
@@ -370,6 +389,19 @@ export default function CollectionApp() {
     <div className="space-y-6">
       {/* Вкладки коллекций */}
       <div className="flex flex-wrap items-center gap-2">
+      {collectionsLoaded && (
+          <button
+            onClick={() => setActiveId(ALL)}
+            style={
+              isAllView
+                ? { backgroundColor: "#fff", borderColor: "#fff", color: "#0d0d0d" }
+                : { borderColor: "#fff", color: "#fff" }
+            }
+            className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
+          >
+            Все игры
+          </button>
+        )}
         {collections.map((c) => {
           const active = activeId === c.id;
           const col = colorForKey(c.id);
@@ -393,19 +425,6 @@ export default function CollectionApp() {
             </button>
           );
         })}
-        {collectionsLoaded && (
-          <button
-            onClick={() => setActiveId(ALL)}
-            style={
-              isAllView
-                ? { backgroundColor: "#fff", borderColor: "#fff", color: "#0d0d0d" }
-                : { borderColor: "#fff", color: "#fff" }
-            }
-            className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
-          >
-            Все игры
-          </button>
-        )}
         <button
           onClick={() => setCreating(true)}
           aria-label="Новая коллекция"

@@ -422,6 +422,30 @@ export function shareCollection(
   return null;
 }
 
+/** Возвращает 'self' | 'not_friend' | null (ошибку), иначе добавляет друга. */
+export function shareCollectionWithUser(
+  collectionId: string,
+  inviteeId: string,
+  role: Role,
+  callerId: string
+): "self" | "not_friend" | null {
+  seed();
+  if (inviteeId === callerId) return "self";
+  const friends = friendships.some(
+    (f) =>
+      f.status === "accepted" &&
+      ((f.requester_id === callerId && f.addressee_id === inviteeId) ||
+        (f.addressee_id === callerId && f.requester_id === inviteeId))
+  );
+  if (!friends) return "not_friend";
+  const existing = members.find(
+    (m) => m.collection_id === collectionId && m.user_id === inviteeId
+  );
+  if (existing) existing.role = role;
+  else members.push({ collection_id: collectionId, user_id: inviteeId, role });
+  return null;
+}
+
 export function removeMember(collectionId: string, userId: string): void {
   seed();
   const idx = members.findIndex(

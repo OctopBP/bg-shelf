@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   listMembers,
   shareCollection,
+  shareCollectionWithUser,
   removeMember,
   type CollectionRole,
 } from "@/lib/collections";
@@ -46,12 +47,18 @@ export async function POST(
   const { id } = await params;
   const body = await request.json().catch(() => null);
   const email = typeof body?.email === "string" ? body.email.trim() : "";
-  const role: CollectionRole = body?.role === "viewer" ? "viewer" : "editor";
-  if (!email) {
-    return NextResponse.json({ error: "Не указан email" }, { status: 400 });
+  const userId = typeof body?.userId === "string" ? body.userId.trim() : "";
+  const role: Exclude<CollectionRole, "owner"> =
+    body?.role === "viewer" ? "viewer" : "editor";
+  if (!email && !userId) {
+    return NextResponse.json({ error: "Не указан получатель" }, { status: 400 });
   }
   try {
-    await shareCollection(supabase, id, email, role);
+    if (userId) {
+      await shareCollectionWithUser(supabase, id, userId, role);
+    } else {
+      await shareCollection(supabase, id, email, role);
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";

@@ -22,6 +22,7 @@ import {
   deleteCollection,
   memberEmails,
   shareCollection,
+  shareCollectionWithUser,
   removeMember,
   getUsername,
   setUsername,
@@ -296,6 +297,28 @@ const restHandlers = [
     const err = shareCollection(
       body.cid,
       body.invitee_email,
+      body.member_role,
+      DEMO_USER.id
+    );
+    if (err) {
+      return HttpResponse.json(
+        { code: "P0001", message: err },
+        { status: 400 }
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // RPC: пригласить друга в коллекцию по user_id
+  http.post("*/rest/v1/rpc/share_collection_with_user", async ({ request }) => {
+    const body = (await request.json()) as {
+      cid: string;
+      invitee_id: string;
+      member_role: Role;
+    };
+    const err = shareCollectionWithUser(
+      body.cid,
+      body.invitee_id,
       body.member_role,
       DEMO_USER.id
     );

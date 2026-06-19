@@ -194,6 +194,7 @@ const SHARE_ERRORS: Record<string, string> = {
   not_owner: "Делиться коллекцией может только владелец.",
   self: "Вы уже владелец этой коллекции.",
   bad_role: "Недопустимая роль.",
+  not_friend: "Приглашать можно только пользователей из списка друзей.",
 };
 
 function shareErrorMessage(raw: string): string {
@@ -212,6 +213,21 @@ export async function shareCollection(
   const { error } = await supabase.rpc("share_collection", {
     cid: collectionId,
     invitee_email: email,
+    member_role: role,
+  });
+  if (error) throw new Error(shareErrorMessage(error.message));
+}
+
+/** Делится коллекцией с другом по его user_id (email друга недоступен). */
+export async function shareCollectionWithUser(
+  supabase: SupabaseClient,
+  collectionId: string,
+  userId: string,
+  role: Exclude<CollectionRole, "owner">
+): Promise<void> {
+  const { error } = await supabase.rpc("share_collection_with_user", {
+    cid: collectionId,
+    invitee_id: userId,
     member_role: role,
   });
   if (error) throw new Error(shareErrorMessage(error.message));

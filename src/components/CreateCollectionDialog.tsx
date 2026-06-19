@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
+import { IconCheck } from "@tabler/icons-react";
 import Modal from "./Modal";
-import type { CollectionVisibility } from "@/lib/collections";
+import type { CollectionRole, CollectionVisibility } from "@/lib/collections";
+import type { Friend } from "@/lib/friends";
+
+type InviteRole = Exclude<CollectionRole, "owner">;
 
 interface VisibilityOption {
   value: CollectionVisibility;
@@ -13,7 +17,12 @@ interface VisibilityOption {
 
 interface CreateCollectionDialogProps {
   options: VisibilityOption[];
-  onSubmit: (name: string, visibility: CollectionVisibility) => void;
+  onSubmit: (
+    name: string,
+    visibility: CollectionVisibility,
+    friendIds: string[],
+    role: InviteRole
+  ) => void;
   onClose: () => void;
 }
 
@@ -24,12 +33,37 @@ export default function CreateCollectionDialog({
 }: CreateCollectionDialogProps) {
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<CollectionVisibility>("public");
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [invited, setInvited] = useState<Set<string>>(new Set());
+  const [role, setRole] = useState<InviteRole>("editor");
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/friends")
+      .then((res) => (res.ok ? res.json() : { friends: [] }))
+      .then((data) => {
+        if (active) setFriends((data.friends as Friend[]) ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function toggleFriend(userId: string) {
+    setInvited((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
-    onSubmit(trimmed, visibility);
+    onSubmit(trimmed, visibility, Array.from(invited), role);
   }
 
   return (
@@ -67,6 +101,43 @@ export default function CreateCollectionDialog({
             })}
           </div>
         </div>
+        {friends.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-bold text-ink/70">Пригласить друзей</p>
+            <div className="flex max-h-40 flex-col gap-2 overflow-y-auto">
+              {friends.map((f) => {
+                const active = invited.has(f.userId);
+                return (
+                  <button
+                    key={f.userId}
+                    type="button"
+                    onClick={() => toggleFriend(f.userId)}
+                    aria-pressed={active}
+                    className={`flex items-center justify-between gap-2 rounded-full border-2 px-4 py-2 text-sm font-bold transition ${
+                      active
+                        ? "border-ink bg-ink text-white"
+                        : "border-ink/15 bg-black/[0.04] text-ink hover:bg-black/[0.08]"
+                    }`}
+                  >
+                    <span className="truncate">@{f.username}</span>
+                    {active && <IconCheck size={16} stroke={2.5} />}
+                  </button>
+                );
+              })}
+            </div>
+            {invited.size > 0 && (
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as InviteRole)}
+                className="field w-full px-3 py-2.5 text-sm"
+                aria-label="Роль приглашённых друзей"
+              >
+                <option value="editor">Редактор (полный доступ)</option>
+                <option value="viewer">Только просмотр</option>
+              </select>
+            )}
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <button
             type="button"
