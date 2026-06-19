@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { runCollectionAgent } from "@/lib/agent";
+import { parseAddCommand, buildProposal } from "@/lib/resolve";
 
 export const maxDuration = 120;
 
@@ -44,6 +45,18 @@ export async function POST(request: Request) {
   console.log(`[command ${reqId}] команда: «${command.trim()}» в коллекции ${collectionId}`);
 
   try {
+    // Сначала определяем намерение. Добавление игр не выполняем сразу, а
+    // возвращаем предложение — клиент покажет окно подтверждения. Остальные
+    // команды (удалить, теги и т.п.) обрабатывает агент как раньше.
+    const parsed = await parseAddCommand(command.trim(), reqId);
+    if (parsed.intent === "add" && parsed.games.length > 0) {
+      const games = await buildProposal(parsed.games, reqId);
+      console.log(
+        `[command ${reqId}] предложение за ${Date.now() - t0}мс, игр=${games.length}`
+      );
+      return NextResponse.json({ kind: "proposal", games });
+    }
+
     const result = await runCollectionAgent(
       command.trim(),
       supabase,
@@ -54,7 +67,7 @@ export async function POST(request: Request) {
     console.log(
       `[command ${reqId}] успех за ${Date.now() - t0}мс, changed=${result.changed}`
     );
-    return NextResponse.json(result);
+    return NextResponse.json({ kind: "reply", ...result });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
     console.error(

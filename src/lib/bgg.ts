@@ -13,6 +13,11 @@ export interface BggSearchResult {
   yearPublished: number | null;
 }
 
+export interface BggExpansion {
+  bggId: number;
+  name: string;
+}
+
 export interface BggGameDetails {
   bggId: number;
   /** Название на языке запроса (сейчас русское, если есть) */
@@ -30,6 +35,8 @@ export interface BggGameDetails {
   description: string | null;
   categories: string[];
   mechanics: string[];
+  /** Дополнения к этой игре (по ссылкам boardgameexpansion в BGG) */
+  expansions: BggExpansion[];
 }
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -139,6 +146,15 @@ export async function getBggGameDetails(
   const linkValues = (type: string) =>
     links.filter((l) => l["@_type"] === type).map((l) => l["@_value"]);
 
+  // Дополнения: outbound-ссылки boardgameexpansion (на странице базовой игры у
+  // них нет inbound="true" — он стоит на обратной ссылке со страницы дополнения).
+  const expansions: BggExpansion[] = links
+    .filter(
+      (l) => l["@_type"] === "boardgameexpansion" && l["@_inbound"] !== "true"
+    )
+    .map((l) => ({ bggId: Number(l["@_id"]), name: l["@_value"] }))
+    .filter((e) => !Number.isNaN(e.bggId) && !!e.name);
+
   const stats = item.statistics as
     | { ratings?: Record<string, unknown> }
     | undefined;
@@ -167,6 +183,7 @@ export async function getBggGameDetails(
         : null,
     categories: linkValues("boardgamecategory"),
     mechanics: linkValues("boardgamemechanic"),
+    expansions,
   };
 }
 

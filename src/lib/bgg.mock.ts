@@ -8,11 +8,14 @@ import type { BggGameDetails } from "./bgg";
 // локализованное. Поле originalName реального BggGameDetails мок не хранит:
 // его вычисляет lib/bgg.ts из primary-имени, которое мок-обработчик строит
 // именно из `name`.
-export interface MockGame extends Omit<BggGameDetails, "originalName"> {
+export interface MockGame
+  extends Omit<BggGameDetails, "originalName" | "expansions"> {
   /** Подстроки для распознавания игры в запросе/команде (нижний регистр) */
   aliases: string[];
   /** Русское (кириллическое) название — отдаётся как alternate-имя BGG */
   nameRu?: string;
+  /** Дополнения — отдаются как ссылки boardgameexpansion в thing-ответе. */
+  expansions?: { bggId: number; name: string }[];
 }
 
 // Заглушки обложек — самодостаточные inline-SVG в палитре приложения
@@ -82,6 +85,10 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Tile Placement", "Area Majority / Influence"],
     aliases: ["каркассон", "каркасон", "carcassonne"],
     nameRu: "Каркассон",
+    expansions: [
+      { bggId: 5404, name: "Carcassonne: Inns & Cathedrals" },
+      { bggId: 5405, name: "Carcassonne: Traders & Builders" },
+    ],
   },
   {
     bggId: 13,
@@ -99,6 +106,10 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Dice Rolling", "Trading", "Modular Board"],
     aliases: ["колонизатор", "катан", "catan", "settlers"],
     nameRu: "Колонизаторы",
+    expansions: [
+      { bggId: 325, name: "Catan: Seafarers" },
+      { bggId: 926, name: "Catan: Cities & Knights" },
+    ],
   },
   {
     bggId: 1927,
@@ -320,5 +331,76 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Cooperative Game", "Area Control", "Variable Player Powers"],
     aliases: ["дух острова", "духи острова", "spirit island"],
     nameRu: "Дух острова",
+  },
+  // --- Дополнения (демо для окна добавления). Базовые игры ссылаются на них
+  // через поле expansions; здесь они существуют как самостоятельные thing, чтобы
+  // их можно было добавить одним кликом. ---
+  {
+    bggId: 5404,
+    name: "Carcassonne: Inns & Cathedrals",
+    yearPublished: 2002,
+    imageUrl: img("Inns & Cathedrals"),
+    thumbnailUrl: img("Inns & Cathedrals"),
+    minPlayers: 2,
+    maxPlayers: 6,
+    playingTime: 45,
+    rating: 7.5,
+    weight: 1.9,
+    description: "[мок] Первое большое дополнение к Каркассону: трактиры и соборы.",
+    categories: ["City Building", "Medieval"],
+    mechanics: ["Tile Placement"],
+    aliases: ["трактиры и соборы", "inns and cathedrals"],
+    nameRu: "Каркассон: Трактиры и соборы",
+  },
+  {
+    bggId: 5405,
+    name: "Carcassonne: Traders & Builders",
+    yearPublished: 2003,
+    imageUrl: img("Traders & Builders"),
+    thumbnailUrl: img("Traders & Builders"),
+    minPlayers: 2,
+    maxPlayers: 6,
+    playingTime: 45,
+    rating: 7.4,
+    weight: 1.9,
+    description: "[мок] Дополнение к Каркассону: торговцы, строители и товары.",
+    categories: ["City Building", "Medieval"],
+    mechanics: ["Tile Placement"],
+    aliases: ["торговцы и строители", "traders and builders"],
+    nameRu: "Каркассон: Торговцы и строители",
+  },
+  {
+    bggId: 325,
+    name: "Catan: Seafarers",
+    yearPublished: 1997,
+    imageUrl: img("Seafarers"),
+    thumbnailUrl: img("Seafarers"),
+    minPlayers: 3,
+    maxPlayers: 4,
+    playingTime: 120,
+    rating: 7.2,
+    weight: 2.4,
+    description: "[мок] Дополнение к Колонизаторам: острова, корабли и открытия.",
+    categories: ["Economic", "Negotiation"],
+    mechanics: ["Dice Rolling", "Modular Board"],
+    aliases: ["мореходы", "seafarers"],
+    nameRu: "Колонизаторы: Мореходы",
+  },
+  {
+    bggId: 926,
+    name: "Catan: Cities & Knights",
+    yearPublished: 1998,
+    imageUrl: img("Cities & Knights"),
+    thumbnailUrl: img("Cities & Knights"),
+    minPlayers: 3,
+    maxPlayers: 4,
+    playingTime: 150,
+    rating: 7.6,
+    weight: 3.0,
+    description: "[мок] Дополнение к Колонизаторам: города, рыцари и варвары.",
+    categories: ["Economic", "Negotiation"],
+    mechanics: ["Dice Rolling", "Modular Board"],
+    aliases: ["города и рыцари", "cities and knights"],
+    nameRu: "Колонизаторы: Города и рыцари",
   },
 ];

@@ -22,6 +22,7 @@ import ShareDialog from "./ShareDialog";
 import PromptDialog from "./PromptDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import MoveGameDialog from "./MoveGameDialog";
+import AddGamesDialog, { type ResolvedGame } from "./AddGamesDialog";
 import { colorAt, colorForKey } from "@/lib/palette";
 import { UNCOLLECTED, type CollectionRole, type CollectionSummary } from "@/lib/collections";
 
@@ -42,6 +43,27 @@ interface CollectionGame {
 
 const ALL = "all";
 
+// Быстрые фильтры по данным BGG — применяются в связке (И) с фильтром по тегам.
+interface QuickFilter {
+  key: string;
+  label: string;
+  test: (g: CollectionGame) => boolean;
+}
+
+const supports = (g: CollectionGame, n: number) =>
+  g.minPlayers != null && g.maxPlayers != null && g.minPlayers <= n && g.maxPlayers >= n;
+
+const QUICK_FILTERS: QuickFilter[] = [
+  { key: "solo", label: "соло", test: (g) => supports(g, 1) },
+  { key: "p2", label: "на двоих", test: (g) => supports(g, 2) },
+  { key: "p4", label: "вчетвером", test: (g) => supports(g, 4) },
+  { key: "party", label: "компания 5+", test: (g) => g.maxPlayers != null && g.maxPlayers >= 5 },
+  { key: "short", label: "до 30 мин", test: (g) => g.playingTime != null && g.playingTime <= 30 },
+  { key: "long", label: "от 90 мин", test: (g) => g.playingTime != null && g.playingTime >= 90 },
+  { key: "r8", label: "рейтинг 8+", test: (g) => g.rating != null && g.rating >= 8 },
+  { key: "r9", label: "рейтинг 9+", test: (g) => g.rating != null && g.rating >= 9 },
+];
+
 export default function CollectionApp() {
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [uncollectedCount, setUncollectedCount] = useState(0);
@@ -55,11 +77,16 @@ export default function CollectionApp() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [quickFilter, setQuickFilter] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [moving, setMoving] = useState<CollectionGame | null>(null);
+  const [proposal, setProposal] = useState<ResolvedGame[] | null>(null);
+  // Растёт с каждым новым предложением — служит key, чтобы окно добавления
+  // пересоздавалось с чистым состоянием, а не переиспользовало прежнее.
+  const [proposalSeq, setProposalSeq] = useState(0);
 
   const isAllView = activeId === ALL;
   const isUncollected = activeId === UNCOLLECTED;
@@ -111,6 +138,7 @@ export default function CollectionApp() {
     const data = res.ok ? await res.json() : { games: [] };
     setGames((data.games as CollectionGame[]) ?? []);
     setTagFilter(null);
+    setQuickFilter(null);
     setLoaded(true);
   }, [activeId, isAllView]);
 
@@ -136,11 +164,23 @@ export default function CollectionApp() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Ошибка");
-      setStatus(data.reply);
       setCommand("");
-      if (data.changed) {
-        loadGames();
-        loadCollections(activeId);
+      // Добавление игр: показываем окно подтверждения вместо мгновенного добавления.
+      if (data.kind === "proposal") {
+        const found = (data.games as ResolvedGame[]) ?? [];
+        if (found.length === 0) {
+          setStatus("Не нашёл игр для добавления в запросе.");
+        } else {
+          setStatus("");
+          setProposal(found);
+          setProposalSeq((n) => n + 1);
+        }
+      } else {
+        setStatus(data.reply);
+        if (data.changed) {
+          loadGames();
+          loadCollections(activeId);
+        }
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Ошибка");
@@ -222,9 +262,25 @@ export default function CollectionApp() {
     [games]
   );
 
-  const visibleGames = tagFilter
-    ? games.filter((g) => g.tags.includes(tagFilter))
-    : games;
+  // Показываем только те быстрые фильтры, под которые есть хотя бы одна игра.
+  const quickFilters = useMemo(
+    () => QUICK_FILTERS.filter((f) => games.some(f.test)),
+    [games]
+  );
+
+  const activeQuick = quickFilter
+    ? QUICK_FILTERS.find((f) => f.key === quickFilter)
+    : undefined;
+
+  const visibleGames = useMemo(
+    () =>
+      games.filter(
+        (g) =>
+          (!tagFilter || g.tags.includes(tagFilter)) &&
+          (!activeQuick || activeQuick.test(g))
+      ),
+    [games, tagFilter, activeQuick]
+  );
 
   return (
     <div className="space-y-6">
@@ -377,6 +433,30 @@ export default function CollectionApp() {
         </div>
       )}
 
+      {/* Быстрые фильтры по данным BGG */}
+      {quickFilters.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {quickFilters.map((f) => {
+            const c = colorForKey(f.key);
+            const active = quickFilter === f.key;
+            return (
+              <button
+                key={f.key}
+                onClick={() => setQuickFilter(active ? null : f.key)}
+                style={
+                  active
+                    ? { backgroundColor: c, borderColor: c, color: "#0d0d0d" }
+                    : { borderColor: c, color: c }
+                }
+                className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Фильтр по тегам */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -431,7 +511,7 @@ export default function CollectionApp() {
                 : canEdit
                   ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
                   : "В этой коллекции пока нет игр."
-              : "Нет игр с этим тегом."}
+              : "Нет игр по выбранному фильтру."}
           </p>
         </div>
       ) : (
@@ -570,6 +650,21 @@ export default function CollectionApp() {
           collections={editableCollections}
           onMove={moveGame}
           onClose={() => setMoving(null)}
+        />
+      )}
+
+      {proposal && (
+        <AddGamesDialog
+          key={proposalSeq}
+          games={proposal}
+          collectionId={commandTarget}
+          suggestedTags={allTags}
+          onClose={() => setProposal(null)}
+          onAdded={() => {
+            loadGames();
+            loadCollections(activeId);
+          }}
+          onStatus={setStatus}
         />
       )}
     </div>

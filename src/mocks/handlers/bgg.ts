@@ -46,6 +46,10 @@ function thingItemXml(g: MockGame): string {
     ...g.mechanics.map(
       (m) => `<link type="boardgamemechanic" value="${xmlEscape(m)}"/>`
     ),
+    ...(g.expansions ?? []).map(
+      (e) =>
+        `<link type="boardgameexpansion" id="${e.bggId}" value="${xmlEscape(e.name)}"/>`
+    ),
   ].join("");
 
   return (

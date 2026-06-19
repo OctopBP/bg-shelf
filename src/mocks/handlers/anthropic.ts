@@ -126,18 +126,41 @@ export const anthropicHandlers = [
   http.post("*/v1/messages", async ({ request }) => {
     const body = (await request.json()) as AnthropicRequestBody;
 
-    // Photo flow: structured output requested.
+    // Structured-output flows (messages.parse): photo recognition vs. command
+    // parsing. Photo requests carry an image block; command parsing is text-only.
     if (body.output_config?.format) {
-      const games = [
-        {
-          title: "Carcassonne",
-          title_on_box: "Каркассон",
-          confidence: "high",
-        },
-        { title: "CATAN", title_on_box: "Колонизаторы", confidence: "medium" },
-      ];
+      const hasImage = body.messages.some(
+        (m) =>
+          Array.isArray(m.content) &&
+          m.content.some((c) => (c as { type?: string }).type === "image")
+      );
+      if (hasImage) {
+        const games = [
+          {
+            title: "Carcassonne",
+            title_on_box: "Каркассон",
+            confidence: "high",
+          },
+          { title: "CATAN", title_on_box: "Колонизаторы", confidence: "medium" },
+        ];
+        return message(
+          [{ type: "text", text: JSON.stringify({ games }) }],
+          "end_turn"
+        );
+      }
+
+      // Command parsing (lib/resolve.ts): reuse the alias/tag matcher. Remove
+      // commands fall through to the agent (intent "other").
+      const parsedCmd = parseCommand(firstUserCommand(body));
+      const intent =
+        !parsedCmd.remove && parsedCmd.games.length > 0 ? "add" : "other";
+      const games = parsedCmd.games.map(({ game, tags }) => ({
+        search_query: game.name,
+        requested_as: game.nameRu ?? game.name,
+        tags,
+      }));
       return message(
-        [{ type: "text", text: JSON.stringify({ games }) }],
+        [{ type: "text", text: JSON.stringify({ intent, games }) }],
         "end_turn"
       );
     }
