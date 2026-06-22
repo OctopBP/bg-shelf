@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBggGameDetails } from "@/lib/bgg";
 
+// Один запрос деталей к BGG с 202-ретраями — 60с с запасом хватает.
 export const maxDuration = 60;
 
 /** Лёгкие данные кандидата для окна подтверждения: имя, год, обложка,

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { recognizeGamesOnPhoto } from "@/lib/photo";
 
+// Vision-распознавание полки (Claude) + последовательный поиск каждой
+// распознанной игры в BGG — может занять заметное время. См. docs/database.md §5.
 export const maxDuration = 120;
 
 const SUPPORTED_TYPES = [

@@ -62,6 +62,9 @@ db reset` применяет миграции и [`supabase/seed.sql`](supabase/
 (демо-вход `demo@boardgames.local` / `demo1234`). Конвенция data-слоя
 (route handlers) — там же, §1.
 
+> Полный онбординг разработчика (миграции, генерация типов, локальный запуск,
+> логирование, общие таблицы предзаказов) — в [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Демо-режим (MSW, deprecated)
 
 > **Deprecated.** MSW-мок заморожен в пользу локального Supabase (см. выше).

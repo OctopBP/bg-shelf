@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { logger } from "./logger";
 import { searchBgg } from "./bgg";
 import {
   addGameToCollection,
@@ -109,9 +110,9 @@ export async function runCollectionAgent(
   userId: string,
   reqId = "????????"
 ): Promise<AgentResult> {
-  const log = (...args: unknown[]) => console.log(`[agent ${reqId}]`, ...args);
-  const logErr = (...args: unknown[]) =>
-    console.error(`[agent ${reqId}]`, ...args);
+  const l = logger.child(`agent ${reqId}`);
+  const log = (...args: unknown[]) => l.info(...args);
+  const logErr = (...args: unknown[]) => l.error(...args);
 
   log(`старт, модель=${MODEL}, API key задан=${!!process.env.ANTHROPIC_API_KEY}`);
   // baseURL берётся из ANTHROPIC_BASE_URL автоматически. Если он указывает на

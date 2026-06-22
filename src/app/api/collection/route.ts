@@ -13,6 +13,9 @@ import {
   type GameInfoUpdate,
 } from "@/lib/collection";
 
+// Потолок задаёт самый долгий метод роута — POST (добавление: BGG-детали по
+// каждой игре с 202-ретраями) и PUT (пакетное перемещение). GET/DELETE быстрые,
+// но maxDuration задаётся на роут целиком. См. docs/database.md §5.
 export const maxDuration = 120;
 
 const PostSchema = z.object({

@@ -79,3 +79,27 @@ supabase db reset        # применить миграции + seed.sql
 (`supabase db reset` на машине с Docker; форму вставки `auth.users`/
 `auth.identities` в `seed.sql` сверить с версией GoTrue). До тех пор MSW-демо
 оставлено рабочим как мост.
+
+## 4. Логирование и maxDuration (Фаза 5)
+
+### Логирование [M-1]
+
+Единый структурный логгер — [`src/lib/logger.ts`](../src/lib/logger.ts):
+`logger.{debug,info,warn,error}` + `logger.child(scope)` для домена/`reqId`.
+Уровень — из `LOG_LEVEL` (`debug|info|warn|error`); по умолчанию `debug` в dev,
+`info` в проде. Прямые `console.*` в коде приложения не используем (исключение —
+сам логгер как sink; MSW-моки — dev-only и тоже deprecated).
+
+### maxDuration serverless-роутов [M-2]
+
+| Роут | maxDuration | Почему |
+|---|---|---|
+| `/api/command` | 120с | LLM + агентный цикл (≤8 итераций) + последовательные BGG |
+| `/api/photo` | 120с | Vision-распознавание + поиск каждой игры в BGG |
+| `/api/collection` | 120с | потолок от POST (BGG-детали на игру) / PUT (пакетное перемещение) |
+| `/api/bgg/details` | 60с | один запрос деталей к BGG с 202-ретраями |
+
+Значения продиктованы внешними задержками (BGG отвечает 202, пока готовит ответ;
+LLM-пайплайн). Снижать рискованно (таймаут на пакетном добавлении/распознавании);
+биллинг идёт по фактическому времени, так что высокий потолок сам по себе не
+дорог. Бюджет LLM — в `docs/database.md` §5.

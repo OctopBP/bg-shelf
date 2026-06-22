@@ -1,12 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { getBggGameDetails } from "./bgg";
+import { logger } from "./logger";
 import {
   clampLimit,
   decodeCursor,
   encodeCursor,
   type Page,
 } from "./pagination";
+
+const log = logger.child("collection");
 
 type DB = SupabaseClient<Database>;
 type GameRow = Database["public"]["Tables"]["games"]["Row"];
@@ -93,13 +96,13 @@ export async function addGameToCollection(
   tags: string[] = [],
   userId?: string
 ): Promise<{ name: string }> {
-  console.log(`[collection] addGameToCollection collection=${collectionId} bggId=${bggId}, tags=[${tags.join(", ")}]`);
+  log.info(`addGameToCollection collection=${collectionId} bggId=${bggId}, tags=[${tags.join(", ")}]`);
   const details = await getBggGameDetails(bggId);
   if (!details) {
-    console.error(`[collection] BGG детали для id=${bggId} не найдены`);
+    log.error(`BGG детали для id=${bggId} не найдены`);
     throw new Error(`Игра с BGG id ${bggId} не найдена`);
   }
-  console.log(`[collection] детали из BGG: «${details.name}» (${details.yearPublished})`);
+  log.info(`детали из BGG: «${details.name}» (${details.yearPublished})`);
 
   // Кэш игр закрыт на прямую запись (RLS — только админ). Обычный пользователь
   // пополняет каталог через SECURITY DEFINER функцию cache_game: она лишь
@@ -122,7 +125,7 @@ export async function addGameToCollection(
     p_mechanics: details.mechanics,
   });
   if (gameError) {
-    console.error(`[collection] cache_game упал:`, gameError);
+    log.error("cache_game упал:", gameError);
     throw new Error(`Не удалось сохранить игру: ${gameError.message}`);
   }
 
@@ -131,11 +134,11 @@ export async function addGameToCollection(
     { onConflict: "collection_id,bgg_id" }
   );
   if (itemError) {
-    console.error(`[collection] upsert collection_items упал:`, itemError);
+    log.error("upsert collection_items упал:", itemError);
     throw new Error(`Не удалось добавить в коллекцию: ${itemError.message}`);
   }
 
-  console.log(`[collection] «${details.name}» добавлена в collection=${collectionId}`);
+  log.info(`«${details.name}» добавлена в collection=${collectionId}`);
   return { name: details.name };
 }
 
@@ -338,7 +341,7 @@ export async function searchLocalGames(
   for (const q of uniqueQueries) {
     const { data, error } = await supabase.rpc("search_games", { q, lim: limit });
     if (error) {
-      console.error(`[search_games] «${q}»:`, error.message);
+      logger.child("search_games").error(`«${q}»:`, error.message);
       continue;
     }
     for (const row of data ?? []) {

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { logger } from "./logger";
 import { searchBgg, getBggGameDetails } from "./bgg";
 import { searchLocalGames } from "./collection";
 
@@ -69,7 +70,7 @@ export async function parseAddCommand(
   command: string,
   reqId = "????????"
 ): Promise<ParsedCommand> {
-  const log = (...args: unknown[]) => console.log(`[resolve ${reqId}]`, ...args);
+  const log = (...args: unknown[]) => logger.child(`resolve ${reqId}`).info(...args);
   const relaySecret = process.env.ANTHROPIC_RELAY_SECRET;
   const anthropic = new Anthropic(
     relaySecret
@@ -136,7 +137,7 @@ export async function buildProposal(
   supabase: SupabaseClient,
   reqId = "????????"
 ): Promise<ResolvedGame[]> {
-  const log = (...args: unknown[]) => console.log(`[resolve ${reqId}]`, ...args);
+  const log = (...args: unknown[]) => logger.child(`resolve ${reqId}`).info(...args);
   const out: ResolvedGame[] = [];
 
   for (const g of games) {

@@ -1,6 +1,8 @@
 import { XMLParser } from "fast-xml-parser";
+import { logger } from "./logger";
 
 const BGG_API = "https://boardgamegeek.com/xmlapi2";
+const log = logger.child("bgg");
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -70,7 +72,7 @@ async function bggFetch(path: string, retries = 3): Promise<string> {
   // С 2025 года BGG требует Bearer-токен: https://boardgamegeek.com/using_the_xml_api
   const token = process.env.BGG_API_TOKEN;
   if (!token) {
-    console.error("[bgg] BGG_API_TOKEN не задан");
+    log.error("BGG_API_TOKEN не задан");
     throw new Error(
       "Не задан BGG_API_TOKEN. Зарегистрируйте приложение на boardgamegeek.com/using_the_xml_api и добавьте токен в .env.local"
     );
@@ -78,7 +80,7 @@ async function bggFetch(path: string, retries = 3): Promise<string> {
 
   // BGG отвечает 202, пока готовит ответ — нужно повторить запрос
   for (let attempt = 0; attempt <= retries; attempt++) {
-    console.log(`[bgg] GET ${path} (попытка ${attempt + 1}/${retries + 1})`);
+    log.info(`GET ${path} (попытка ${attempt + 1}/${retries + 1})`);
     const t0 = Date.now();
     let res: Response;
     try {
@@ -89,24 +91,22 @@ async function bggFetch(path: string, retries = 3): Promise<string> {
         },
       });
     } catch (e) {
-      console.error(`[bgg] сетевая ошибка fetch ${path}:`, e);
+      log.error(`сетевая ошибка fetch ${path}:`, e);
       throw e;
     }
-    console.log(`[bgg] ${path} → ${res.status} за ${Date.now() - t0}мс`);
+    log.info(`${path} → ${res.status} за ${Date.now() - t0}мс`);
     if (res.status === 202) {
       await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
       continue;
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error(
-        `[bgg] ошибка ${path}: ${res.status} ${res.statusText} — ${text.slice(0, 300)}`
-      );
+      log.error(`ошибка ${path}: ${res.status} ${res.statusText} — ${text.slice(0, 300)}`);
       throw new Error(`BGG API error: ${res.status} ${res.statusText}`);
     }
     return res.text();
   }
-  console.error(`[bgg] ${path}: превышено число попыток (202)`);
+  log.error(`${path}: превышено число попыток (202)`);
   throw new Error("BGG API: превышено число попыток (ответ 202)");
 }
 
