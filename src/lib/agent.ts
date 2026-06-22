@@ -164,7 +164,11 @@ export async function runCollectionAgent(
         return `Теги обновлены: ${tags.join(", ")}`;
       }
       case "list_collection": {
-        const items = await listCollection(supabase, collectionId);
+        // Агенту нужен обзор коллекции для удаления/тегов по названию. Берём
+        // одну большую страницу (для типовых коллекций этого достаточно).
+        const { items } = await listCollection(supabase, collectionId, {
+          limit: 200,
+        });
         return JSON.stringify(
           items.map((i) => ({ bgg_id: i.bggId, name: i.name, tags: i.tags }))
         );
@@ -178,7 +182,11 @@ export async function runCollectionAgent(
     { role: "user", content: command },
   ];
 
-  const MAX_ITERATIONS = 16;
+  // Бюджет агента (верхний предел стоимости/времени, P-7): не больше
+  // MAX_ITERATIONS обращений к модели, effort=low (операции простые —
+  // поиск/добавление/теги), maxDuration=120с на роуте. Путь добавления игр идёт
+  // мимо агента (parseAddCommand → предложение), поэтому здесь обычно 1–3 шага.
+  const MAX_ITERATIONS = 8;
   let response: Anthropic.Message | null = null;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -189,6 +197,7 @@ export async function runCollectionAgent(
         model: MODEL,
         max_tokens: 4096,
         thinking: { type: "adaptive" },
+        output_config: { effort: "low" },
         system: SYSTEM_PROMPT,
         tools,
         messages,

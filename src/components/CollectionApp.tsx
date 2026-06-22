@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconArrowRight,
   IconChecks,
@@ -106,6 +106,8 @@ export default function CollectionApp() {
 
   const [games, setGames] = useState<CollectionGame[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [command, setCommand] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -163,26 +165,70 @@ export default function CollectionApp() {
     loadCollections();
   }, [loadCollections]);
 
+  // Базовый URL списка игр (одна коллекция или сводный вид «Все игры»).
+  const gamesUrl = useCallback(
+    (cursor?: string | null) => {
+      const base = isAllView
+        ? "/api/collection?all=1"
+        : `/api/collection?collectionId=${activeId}`;
+      return cursor ? `${base}&cursor=${encodeURIComponent(cursor)}` : base;
+    },
+    [activeId, isAllView],
+  );
+
   const loadGames = useCallback(async () => {
     setLoaded(false);
-    const url = isAllView
-      ? "/api/collection?all=1"
-      : `/api/collection?collectionId=${activeId}`;
-    const res = await fetch(url);
-    const data = res.ok ? await res.json() : { games: [] };
+    const res = await fetch(gamesUrl());
+    const data = res.ok ? await res.json() : { games: [], nextCursor: null };
     setGames((data.games as CollectionGame[]) ?? []);
+    setNextCursor((data.nextCursor as string | null) ?? null);
     setTagFilters([]);
     setQuickFilter(null);
     setSelecting(false);
     setSelectedIds(new Set());
     setLoaded(true);
-  }, [activeId, isAllView]);
+  }, [gamesUrl]);
+
+  // Догрузка следующей страницы (курсорная пагинация): добавляем к уже
+  // загруженным играм, не сбрасывая фильтры/выбор.
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(gamesUrl(nextCursor));
+      const data = res.ok ? await res.json() : { games: [], nextCursor: null };
+      const more = (data.games as CollectionGame[]) ?? [];
+      setGames((prev) => {
+        const seen = new Set(prev.map((g) => g.id));
+        return [...prev, ...more.filter((g) => !seen.has(g.id))];
+      });
+      setNextCursor((data.nextCursor as string | null) ?? null);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore, gamesUrl]);
 
   useEffect(() => {
     if (!collectionsLoaded) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadGames();
   }, [collectionsLoaded, loadGames]);
+
+  // Бесконечная подгрузка: когда «маяк» в конце списка попадает в зону
+  // видимости — тянем следующую страницу.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !nextCursor) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [nextCursor, loadMore]);
 
   // Куда применять команды/фото. В сводном виде «Все игры» — в коллекцию
   // по умолчанию.
@@ -761,6 +807,20 @@ export default function CollectionApp() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Маяк бесконечной прокрутки + ручная кнопка (нужна, когда фильтр
+          оставил мало строк и автоскролл не срабатывает). */}
+      {loaded && nextCursor && (
+        <div ref={sentinelRef} className="flex justify-center py-6">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-full border-[3px] border-ink bg-white px-5 py-2 font-semibold text-ink hover:bg-brand hover:text-white disabled:opacity-50"
+          >
+            {loadingMore ? "Загрузка…" : "Показать ещё"}
+          </button>
         </div>
       )}
 

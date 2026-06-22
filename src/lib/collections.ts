@@ -27,36 +27,43 @@ export interface CollectionMember {
   role: CollectionRole;
 }
 
-/** Коллекции, к которым у текущего пользователя есть доступ (через membership). */
+/** Число игр по коллекциям — агрегат на стороне БД (вью collection_item_counts),
+ *  без выборки всех строк collection_items. RLS применяется к вызывающему
+ *  (security_invoker), поэтому считаются только доступные строки. */
+async function collectionGameCounts(
+  supabase: DB,
+  ids: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (ids.length === 0) return counts;
+  const { data, error } = await supabase
+    .from("collection_item_counts")
+    .select("collection_id, game_count")
+    .in("collection_id", ids);
+  if (error) throw new Error(error.message);
+  for (const row of data ?? []) {
+    if (row.collection_id) counts.set(row.collection_id, row.game_count ?? 0);
+  }
+  return counts;
+}
+
+/** Коллекции, к которым у пользователя есть доступ (через membership).
+ *  `userId` пробрасывается из роута — лишний auth.getUser() внутри не делаем. */
 export async function listCollections(
-  supabase: DB
+  supabase: DB,
+  userId: string
 ): Promise<CollectionSummary[]> {
   // RLS на collection_members отдаёт строки всех участников расшаренных
   // коллекций — поэтому явно фильтруем по своей строке, иначе коллекция
   // задвоится (по строке на каждого участника) и роль будет чужой.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Не авторизован");
-
   const { data, error } = await supabase
     .from("collection_members")
     .select("role, collections(id, name, owner_id, visibility, is_default, created_at)")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .order("created_at", { referencedTable: "collections", ascending: true });
   if (error) throw new Error(error.message);
 
-  // Счётчики игр одним запросом (RLS вернёт только доступные строки).
-  const counts = new Map<string, number>();
-  const { data: items, error: countErr } = await supabase
-    .from("collection_items")
-    .select("collection_id");
-  if (countErr) throw new Error(countErr.message);
-  for (const it of items ?? []) {
-    counts.set(it.collection_id, (counts.get(it.collection_id) ?? 0) + 1);
-  }
-
-  return (data ?? [])
+  const partial = (data ?? [])
     .map((row) => {
       // PostgREST отдаёт embed many-to-one объектом, но в типах supabase-js
       // он может оказаться массивом — нормализуем к одному объекту.
@@ -70,10 +77,15 @@ export async function listCollections(
         role: row.role as CollectionRole,
         visibility: (c.visibility as CollectionVisibility) ?? "public",
         isDefault: c.is_default ?? false,
-        gameCount: counts.get(c.id) ?? 0,
-      } satisfies CollectionSummary;
+      };
     })
-    .filter((c): c is CollectionSummary => c !== null);
+    .filter((c): c is NonNullable<typeof c> => c !== null);
+
+  const counts = await collectionGameCounts(
+    supabase,
+    partial.map((p) => p.id)
+  );
+  return partial.map((p) => ({ ...p, gameCount: counts.get(p.id) ?? 0 }));
 }
 
 /**
@@ -95,16 +107,10 @@ export async function listCollectionsByOwner(
   const collections = data ?? [];
   if (collections.length === 0) return [];
 
-  const ids = collections.map((c) => c.id);
-  const counts = new Map<string, number>();
-  const { data: items, error: countErr } = await supabase
-    .from("collection_items")
-    .select("collection_id")
-    .in("collection_id", ids);
-  if (countErr) throw new Error(countErr.message);
-  for (const it of items ?? []) {
-    counts.set(it.collection_id, (counts.get(it.collection_id) ?? 0) + 1);
-  }
+  const counts = await collectionGameCounts(
+    supabase,
+    collections.map((c) => c.id)
+  );
 
   return collections.map((c) => ({
     id: c.id,

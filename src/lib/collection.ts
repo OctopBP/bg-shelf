@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { getBggGameDetails } from "./bgg";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type Page,
+} from "./pagination";
 
 type DB = SupabaseClient<Database>;
 type GameRow = Database["public"]["Tables"]["games"]["Row"];
@@ -251,18 +257,54 @@ export async function getCollectionGame(
   return mapRow(data);
 }
 
+/** Строит страницу из выбранных (limit+1) строк: курсор следующей страницы —
+ *  пара (added_at, id) последнего элемента в пределах limit; иначе конец. */
+function pageFrom(rows: CollectionGame[], limit: number): Page<CollectionGame> {
+  if (rows.length > limit) {
+    const items = rows.slice(0, limit);
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor: encodeCursor({ addedAt: last.addedAt, id: last.id }),
+    };
+  }
+  return { items: rows, nextCursor: null };
+}
+
+/** Фильтр «строго после курсора» при сортировке (added_at desc, id desc):
+ *  added_at < cur.addedAt ИЛИ (added_at = cur.addedAt И id < cur.id). */
+function cursorClause(raw: string | null | undefined): string | null {
+  const cur = decodeCursor(raw);
+  if (!cur) return null;
+  return `added_at.lt."${cur.addedAt}",and(added_at.eq."${cur.addedAt}",id.lt."${cur.id}")`;
+}
+
+export interface ListOptions {
+  cursor?: string | null;
+  limit?: number;
+}
+
+/** Страница игр одной коллекции (курсорная пагинация по added_at+id). */
 export async function listCollection(
   supabase: DB,
-  collectionId: string
-): Promise<CollectionGame[]> {
-  const { data, error } = await supabase
+  collectionId: string,
+  opts: ListOptions = {}
+): Promise<Page<CollectionGame>> {
+  const limit = clampLimit(opts.limit);
+  let query = supabase
     .from("collection_items")
     .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
-    .eq("collection_id", collectionId)
-    .order("added_at", { ascending: false });
+    .eq("collection_id", collectionId);
+  const clause = cursorClause(opts.cursor);
+  if (clause) query = query.or(clause);
+
+  const { data, error } = await query
+    .order("added_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map(mapRow);
+  return pageFrom((data ?? []).map(mapRow), limit);
 }
 
 /** Совпадение из нашей БД по основному или альтернативному названию. */
@@ -320,28 +362,32 @@ export async function searchLocalGames(
  *  иначе RLS отдал бы ещё и чужие публичные коллекции и коллекции друзей.
  *  Имя коллекции приходит из joined-select. */
 export async function listAllGames(
-  supabase: DB
-): Promise<CollectionGame[]> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Не авторизован");
-
+  supabase: DB,
+  userId: string,
+  opts: ListOptions = {}
+): Promise<Page<CollectionGame>> {
   const { data: memberships, error: memErr } = await supabase
     .from("collection_members")
     .select("collection_id")
-    .eq("user_id", user.id);
+    .eq("user_id", userId);
   if (memErr) throw new Error(memErr.message);
 
   const ids = (memberships ?? []).map((m) => m.collection_id);
-  if (ids.length === 0) return [];
+  if (ids.length === 0) return { items: [], nextCursor: null };
 
-  const { data, error } = await supabase
+  const limit = clampLimit(opts.limit);
+  let query = supabase
     .from("collection_items")
     .select("id, collection_id, bgg_id, tags, notes, added_at, games(*), collections(name)")
-    .in("collection_id", ids)
-    .order("added_at", { ascending: false });
+    .in("collection_id", ids);
+  const clause = cursorClause(opts.cursor);
+  if (clause) query = query.or(clause);
+
+  const { data, error } = await query
+    .order("added_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map(mapRow);
+  return pageFrom((data ?? []).map(mapRow), limit);
 }

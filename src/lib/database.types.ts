@@ -535,7 +535,21 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      collection_item_counts: {
+        Row: {
+          collection_id: string | null
+          game_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_items_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       approve_draft: {

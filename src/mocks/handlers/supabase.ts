@@ -184,6 +184,32 @@ const restHandlers = [
     return HttpResponse.json(rows);
   }),
 
+  // Вью collection_item_counts: агрегат «игр в коллекции» (Фаза 2 P-1).
+  // Запрос приходит как ?select=collection_id,game_count&collection_id=in.(…).
+  http.get("*/rest/v1/collection_item_counts", ({ request }) => {
+    const url = new URL(request.url);
+    const raw = url.searchParams.get("collection_id");
+    const inList = raw?.startsWith("in.(")
+      ? raw
+          .slice(4, -1)
+          .split(",")
+          .map((s) => s.replace(/^"|"$/g, ""))
+      : null;
+    const rows = inList
+      ? selectItemCollectionIdsIn(inList)
+      : selectItemCollectionIds(DEMO_USER.id);
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      counts.set(r.collection_id, (counts.get(r.collection_id) ?? 0) + 1);
+    }
+    return HttpResponse.json(
+      [...counts].map(([collection_id, game_count]) => ({
+        collection_id,
+        game_count,
+      }))
+    );
+  }),
+
   // upsert collection_items (one object or an array).
   http.post("*/rest/v1/collection_items", async ({ request }) => {
     const body = await request.json();

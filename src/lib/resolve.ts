@@ -5,7 +5,9 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { searchBgg, getBggGameDetails } from "./bgg";
 import { searchLocalGames } from "./collection";
 
-const MODEL = "claude-opus-4-8";
+// Разбор намерения — это классификация + извлечение полей со структурированным
+// выходом (zod). Haiku 4.5 справляется и кратно дешевле/быстрее Opus (P-6).
+const MODEL = "claude-haiku-4-5";
 
 // Сколько кандидатов-альтернатив показываем на каждую запрошенную игру и сколько
 // дополнений тянем для выбранного кандидата.

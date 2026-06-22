@@ -24,7 +24,7 @@ export async function GET() {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   try {
-    const collections = await listCollections(supabase);
+    const collections = await listCollections(supabase, user.id);
     return NextResponse.json({ collections, userId: user.id });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";

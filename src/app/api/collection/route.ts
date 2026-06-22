@@ -72,17 +72,26 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const collectionId = searchParams.get("collectionId");
   const all = searchParams.get("all");
+  const cursor = searchParams.get("cursor");
+  const limitParam = searchParams.get("limit");
+  const limit = limitParam ? Number(limitParam) : undefined;
 
   try {
     if (all) {
-      const games = await listAllGames(supabase);
-      return NextResponse.json({ games });
+      const { items, nextCursor } = await listAllGames(supabase, user.id, {
+        cursor,
+        limit,
+      });
+      return NextResponse.json({ games: items, nextCursor });
     }
     if (!collectionId) {
       return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
     }
-    const games = await listCollection(supabase, collectionId);
-    return NextResponse.json({ games });
+    const { items, nextCursor } = await listCollection(supabase, collectionId, {
+      cursor,
+      limit,
+    });
+    return NextResponse.json({ games: items, nextCursor });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
     return NextResponse.json({ error: message }, { status: 500 });
