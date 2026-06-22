@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { searchBgg, getBggGameDetails } from "./bgg";
+import { searchLocalGames } from "./collection";
 
 const MODEL = "claude-opus-4-8";
 
@@ -123,26 +125,60 @@ export interface ResolvedGame {
 }
 
 /** По распознанным играм собирает предложение: кандидаты + дополнения.
- *  BGG-запросы делаем последовательно — API не любит частые обращения. */
+ *  Сначала ищем в нашей БД (по основному И альтернативным названиям — так
+ *  «Бирмингем» находит Brass: Birmingham), затем дополняем поиском BGG для игр,
+ *  которых ещё нет в базе. BGG-запросы делаем последовательно — API не любит
+ *  частые обращения. */
 export async function buildProposal(
   games: ParsedAddGame[],
+  supabase: SupabaseClient,
   reqId = "????????"
 ): Promise<ResolvedGame[]> {
   const log = (...args: unknown[]) => console.log(`[resolve ${reqId}]`, ...args);
   const out: ResolvedGame[] = [];
 
   for (const g of games) {
-    let candidates: ResolvedCandidate[] = [];
+    const candidates: ResolvedCandidate[] = [];
+    const seen = new Set<number>();
+
+    // 1) Локальная БД: поиск по основному и альтернативным названиям. Ищем и по
+    // тому, как сказал пользователь (часто это локальное/альт-название), и по
+    // переведённому searchQuery. Точные альт-совпадения встают первыми.
     try {
-      candidates = (await searchBgg(g.searchQuery))
-        .slice(0, MAX_CANDIDATES)
-        .map((c) => ({
-          bggId: c.bggId,
-          name: c.name,
-          yearPublished: c.yearPublished,
-        }));
+      const local = await searchLocalGames(
+        supabase,
+        [g.requestedAs, g.searchQuery],
+        MAX_CANDIDATES
+      );
+      for (const m of local) {
+        if (seen.has(m.bggId)) continue;
+        seen.add(m.bggId);
+        candidates.push({
+          bggId: m.bggId,
+          name: m.name,
+          yearPublished: m.yearPublished,
+        });
+      }
     } catch (e) {
-      log(`поиск «${g.searchQuery}» упал:`, e);
+      log(`локальный поиск «${g.requestedAs}» упал:`, e);
+    }
+
+    // 2) BGG: дополняем кандидатами из BGG (новые игры, которых нет в нашей БД).
+    if (candidates.length < MAX_CANDIDATES) {
+      try {
+        for (const c of await searchBgg(g.searchQuery)) {
+          if (seen.has(c.bggId)) continue;
+          seen.add(c.bggId);
+          candidates.push({
+            bggId: c.bggId,
+            name: c.name,
+            yearPublished: c.yearPublished,
+          });
+          if (candidates.length >= MAX_CANDIDATES) break;
+        }
+      } catch (e) {
+        log(`поиск «${g.searchQuery}» упал:`, e);
+      }
     }
 
     let thumbnailUrl: string | null = null;

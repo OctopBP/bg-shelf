@@ -246,6 +246,56 @@ export async function listCollection(
   return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
 }
 
+/** Совпадение из нашей БД по основному или альтернативному названию. */
+export interface LocalGameMatch {
+  bggId: number;
+  name: string;
+  yearPublished: number | null;
+  thumbnailUrl: string | null;
+}
+
+/**
+ * Ищет игры в нашей БД по основному И альтернативным названиям (RPC
+ * `search_games` — триграммный fuzzy-поиск по таблице game_names). Принимает
+ * несколько вариантов запроса (например, как сказал пользователь и переведённое
+ * на оригинал название) и объединяет результаты, сохраняя порядок и убирая дубли
+ * по bgg_id. Игры без bgg_id пропускаем — их пока нельзя положить в коллекцию
+ * (collection_items ссылается на games.bgg_id). Best-effort: при ошибке RPC
+ * (например, демо-режим) возвращает пустой список, и вызывающий код откатывается
+ * на поиск BGG. */
+export async function searchLocalGames(
+  supabase: SupabaseClient,
+  queries: string[],
+  limit = 4
+): Promise<LocalGameMatch[]> {
+  const seen = new Set<number>();
+  const out: LocalGameMatch[] = [];
+  const uniqueQueries = [
+    ...new Set(queries.map((q) => q.trim()).filter(Boolean)),
+  ];
+
+  for (const q of uniqueQueries) {
+    const { data, error } = await supabase.rpc("search_games", { q, lim: limit });
+    if (error) {
+      console.error(`[search_games] «${q}»:`, error.message);
+      continue;
+    }
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      const bggId = row.bgg_id as number | null;
+      if (bggId == null || seen.has(bggId)) continue;
+      seen.add(bggId);
+      out.push({
+        bggId,
+        name: row.name as string,
+        yearPublished: (row.year_published as number | null) ?? null,
+        thumbnailUrl: (row.thumbnail_url as string | null) ?? null,
+      });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
 /** Игры из коллекций самого пользователя (сводный вид «Все игры»).
  *  Берём только коллекции, в которых пользователь состоит (как и список вкладок),
  *  иначе RLS отдал бы ещё и чужие публичные коллекции и коллекции друзей.

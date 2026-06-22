@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     // команды (удалить, теги и т.п.) обрабатывает агент как раньше.
     const parsed = await parseAddCommand(command.trim(), reqId);
     if (parsed.intent === "add" && parsed.games.length > 0) {
-      const games = await buildProposal(parsed.games, reqId);
+      const games = await buildProposal(parsed.games, supabase, reqId);
       console.log(
         `[command ${reqId}] предложение за ${Date.now() - t0}мс, игр=${games.length}`
       );

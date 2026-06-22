@@ -7,6 +7,7 @@ import { http, HttpResponse } from "msw";
 import { DEMO_USER } from "@/lib/mock/config";
 import {
   upsertGame,
+  searchGames,
   upsertItem,
   deleteItem,
   updateItemFields,
@@ -281,6 +282,15 @@ const restHandlers = [
   }),
 
   // RPC: создание коллекции
+  // RPC: поиск игр по имени/альт-именам (демо — по name + original_name)
+  http.post("*/rest/v1/rpc/search_games", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      q?: string;
+      lim?: number;
+    };
+    return HttpResponse.json(searchGames(body.q ?? "", body.lim ?? 4));
+  }),
+
   http.post("*/rest/v1/rpc/create_collection", async ({ request }) => {
     const body = (await request.json()) as { name: string };
     const collection = createCollection(DEMO_USER.id, body.name);

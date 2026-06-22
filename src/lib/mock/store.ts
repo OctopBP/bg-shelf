@@ -221,6 +221,21 @@ export function updateGame(bggId: number, fields: Partial<GameRecord>): void {
   if (game) games.set(bggId, { ...game, ...fields, bgg_id: bggId });
 }
 
+/** Демо-аналог RPC search_games: подстрочный поиск по локализованному и
+ *  оригинальному названиям (реальная БД ищет ещё и по альтернативным именам). */
+export function searchGames(q: string, limit = 4): GameRecord[] {
+  seed();
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  const out: GameRecord[] = [];
+  for (const g of games.values()) {
+    const hay = `${g.name} ${g.original_name ?? ""}`.toLowerCase();
+    if (hay.includes(needle)) out.push(g);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 // --- Collection items ------------------------------------------------------
 export function upsertItem(
   collectionId: string,
