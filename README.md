@@ -19,7 +19,13 @@
 ### 1. Supabase
 
 1. Создайте проект на [supabase.com](https://supabase.com)
-2. В **SQL Editor** выполните содержимое [`supabase/schema.sql`](supabase/schema.sql)
+2. Примените схему миграциями (канон — `supabase/migrations/`, схему руками не правим):
+   ```bash
+   supabase link --project-ref <ваш-project-ref>
+   supabase db push
+   ```
+   Подробнее о схеме, генерации типов (`npm run types:gen`) и общих таблицах
+   предзаказов — в [`docs/database.md`](docs/database.md).
 3. Скопируйте `Project URL` и `anon key` из **Project Settings → API**
 
 > По умолчанию Supabase требует подтверждение email при регистрации. Для локальной разработки можно отключить: **Authentication → Providers → Email → Confirm email — off**.

@@ -1,11 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "@/lib/mock/config";
+import type { Database } from "@/lib/database.types";
 
 export async function createClient() {
   const cookieStore = await cookies();
 
-  return createServerClient(
+  return createServerClient<Database>(
     SUPABASE_URL,
     SUPABASE_PUBLISHABLE_KEY,
     {

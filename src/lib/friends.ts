@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/database.types";
+
+type DB = SupabaseClient<Database>;
 
 export interface Friend {
   /** id строки дружбы (для accept/delete) */
@@ -17,16 +20,14 @@ export interface FriendData {
 
 export const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
-interface FriendshipRow {
-  id: string;
-  requester_id: string;
-  addressee_id: string;
-  status: "pending" | "accepted";
-}
+type FriendshipRow = Pick<
+  Database["public"]["Tables"]["friendships"]["Row"],
+  "id" | "requester_id" | "addressee_id" | "status"
+>;
 
 /** Ник текущего пользователя. */
 export async function getMyUsername(
-  supabase: SupabaseClient,
+  supabase: DB,
   userId: string
 ): Promise<string | null> {
   const { data, error } = await supabase
@@ -35,12 +36,12 @@ export async function getMyUsername(
     .eq("id", userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return (data?.username as string | undefined) ?? null;
+  return data?.username ?? null;
 }
 
 /** Сменить собственный ник. Бросает понятную ошибку, если формат неверный или ник занят. */
 export async function setMyUsername(
-  supabase: SupabaseClient,
+  supabase: DB,
   userId: string,
   username: string
 ): Promise<void> {
@@ -62,7 +63,7 @@ export async function setMyUsername(
 
 /** Все дружбы и запросы текущего пользователя, разложенные по корзинам. */
 export async function getFriendData(
-  supabase: SupabaseClient,
+  supabase: DB,
   userId: string
 ): Promise<FriendData> {
   // RLS отдаёт только строки, где мы участвуем.
@@ -72,7 +73,7 @@ export async function getFriendData(
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as FriendshipRow[];
+  const rows: FriendshipRow[] = data ?? [];
   const otherIds = Array.from(
     new Set(
       rows.map((r) => (r.requester_id === userId ? r.addressee_id : r.requester_id))
@@ -101,7 +102,7 @@ export async function getFriendData(
 }
 
 async function usernamesByIds(
-  supabase: SupabaseClient,
+  supabase: DB,
   ids: string[]
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
@@ -111,7 +112,7 @@ async function usernamesByIds(
     .select("id, username")
     .in("id", ids);
   if (error) throw new Error(error.message);
-  for (const p of (data ?? []) as { id: string; username: string }[]) {
+  for (const p of data ?? []) {
     map.set(p.id, p.username);
   }
   return map;
@@ -122,7 +123,7 @@ async function usernamesByIds(
  * принимает его. Возвращает 'sent' | 'accepted'.
  */
 export async function sendFriendRequest(
-  supabase: SupabaseClient,
+  supabase: DB,
   userId: string,
   username: string
 ): Promise<"sent" | "accepted"> {
@@ -137,7 +138,7 @@ export async function sendFriendRequest(
   if (pErr) throw new Error(pErr.message);
   if (!profile) throw new Error("Пользователь с таким ником не найден.");
 
-  const targetId = profile.id as string;
+  const targetId = profile.id;
   if (targetId === userId) throw new Error("Нельзя добавить в друзья себя.");
 
   // Существующая связь в любом направлении (RLS вернёт её, раз мы участвуем).
@@ -151,7 +152,7 @@ export async function sendFriendRequest(
   if (eErr) throw new Error(eErr.message);
 
   if (existing) {
-    const row = existing as FriendshipRow;
+    const row = existing;
     if (row.status === "accepted") throw new Error("Вы уже друзья.");
     if (row.requester_id === userId) throw new Error("Запрос уже отправлен.");
     // Встречный запрос — принимаем.
@@ -174,7 +175,7 @@ export async function sendFriendRequest(
 
 /** Принять входящий запрос. RLS разрешает обновление только адресату. */
 export async function acceptFriendRequest(
-  supabase: SupabaseClient,
+  supabase: DB,
   friendshipId: string
 ): Promise<void> {
   const { error } = await supabase
@@ -186,7 +187,7 @@ export async function acceptFriendRequest(
 
 /** Отклонить запрос / отменить свой / удалить из друзей — это удаление строки. */
 export async function removeFriendship(
-  supabase: SupabaseClient,
+  supabase: DB,
   friendshipId: string
 ): Promise<void> {
   const { error } = await supabase
@@ -198,7 +199,7 @@ export async function removeFriendship(
 
 /** Ник друга, если между нами принятая дружба; иначе null (нет доступа). */
 export async function getFriendUsername(
-  supabase: SupabaseClient,
+  supabase: DB,
   userId: string,
   friendId: string
 ): Promise<string | null> {

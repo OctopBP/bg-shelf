@@ -1,5 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/database.types";
 import { getBggGameDetails } from "./bgg";
+
+type DB = SupabaseClient<Database>;
+type GameRow = Database["public"]["Tables"]["games"]["Row"];
+
+/** Форма строки joined-select (collection_items + games [+ collections]). */
+type CollectionItemRow = Pick<
+  Database["public"]["Tables"]["collection_items"]["Row"],
+  "id" | "collection_id" | "bgg_id" | "tags" | "notes" | "added_at"
+> & {
+  games: GameRow | null;
+  collections?: { name: string } | null;
+};
 
 export interface CollectionGame {
   id: string;
@@ -38,36 +51,37 @@ export interface GameInfoUpdate {
 }
 
 /** Приводит строку joined-select (collection_items + games) к CollectionGame. */
-function mapRow(row: Record<string, unknown>): CollectionGame {
-  const game = row.games as unknown as Record<string, unknown>;
-  const collection = row.collections as Record<string, unknown> | undefined;
+function mapRow(row: CollectionItemRow): CollectionGame {
+  const game = row.games;
+  if (!game) throw new Error("Запись коллекции без связанной игры в кэше games");
+  const collection = row.collections ?? undefined;
   return {
-    id: row.id as string,
-    collectionId: row.collection_id as string,
-    ...(collection ? { collectionName: collection.name as string } : {}),
-    bggId: row.bgg_id as number,
-    name: game.name as string,
-    originalName: (game.original_name as string | null) ?? null,
-    yearPublished: game.year_published as number | null,
-    thumbnailUrl: game.thumbnail_url as string | null,
-    imageUrl: game.image_url as string | null,
-    minPlayers: game.min_players as number | null,
-    maxPlayers: game.max_players as number | null,
-    playingTime: game.playing_time as number | null,
-    rating: game.rating as number | null,
-    weight: game.weight as number | null,
-    description: (game.description as string | null) ?? null,
-    categories: (game.categories as string[]) ?? [],
-    mechanics: (game.mechanics as string[]) ?? [],
-    tags: (row.tags as string[]) ?? [],
-    notes: (row.notes as string | null) ?? null,
-    addedAt: row.added_at as string,
+    id: row.id,
+    collectionId: row.collection_id,
+    ...(collection ? { collectionName: collection.name } : {}),
+    bggId: row.bgg_id,
+    name: game.name,
+    originalName: game.original_name ?? null,
+    yearPublished: game.year_published,
+    thumbnailUrl: game.thumbnail_url,
+    imageUrl: game.image_url,
+    minPlayers: game.min_players,
+    maxPlayers: game.max_players,
+    playingTime: game.playing_time,
+    rating: game.rating,
+    weight: game.weight,
+    description: game.description ?? null,
+    categories: game.categories ?? [],
+    mechanics: game.mechanics ?? [],
+    tags: row.tags ?? [],
+    notes: row.notes ?? null,
+    addedAt: row.added_at,
   };
 }
 
 /** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию. */
 export async function addGameToCollection(
-  supabase: SupabaseClient,
+  supabase: DB,
   collectionId: string,
   bggId: number,
   tags: string[] = [],
@@ -117,7 +131,7 @@ export async function addGameToCollection(
 }
 
 export async function removeGameFromCollection(
-  supabase: SupabaseClient,
+  supabase: DB,
   collectionId: string,
   bggId: number
 ): Promise<void> {
@@ -132,7 +146,7 @@ export async function removeGameFromCollection(
 /** Переносит запись игры из одной коллекции в другую. Теги и заметку
  *  сохраняем. BGG не трогаем — игра уже есть в кэше games. */
 export async function moveGameToCollection(
-  supabase: SupabaseClient,
+  supabase: DB,
   fromCollectionId: string,
   toCollectionId: string,
   bggId: number,
@@ -148,8 +162,8 @@ export async function moveGameToCollection(
     .maybeSingle();
   if (selErr) throw new Error(selErr.message);
   if (!existing) throw new Error("Игра не найдена в исходной коллекции");
-  const tags = (existing.tags as string[]) ?? [];
-  const notes = (existing.notes as string | null) ?? null;
+  const tags = existing.tags ?? [];
+  const notes = existing.notes ?? null;
 
   const { error: insErr } = await supabase.from("collection_items").upsert(
     { collection_id: toCollectionId, bgg_id: bggId, tags, notes, added_by: userId },
@@ -161,7 +175,7 @@ export async function moveGameToCollection(
 }
 
 export async function updateGameTags(
-  supabase: SupabaseClient,
+  supabase: DB,
   collectionId: string,
   bggId: number,
   tags: string[]
@@ -176,12 +190,12 @@ export async function updateGameTags(
 
 /** Обновляет данные записи коллекции (теги и/или заметку). */
 export async function updateCollectionItem(
-  supabase: SupabaseClient,
+  supabase: DB,
   collectionId: string,
   bggId: number,
   fields: { tags?: string[]; notes?: string | null }
 ): Promise<void> {
-  const patch: Record<string, unknown> = {};
+  const patch: Database["public"]["Tables"]["collection_items"]["Update"] = {};
   if (fields.tags !== undefined) patch.tags = fields.tags;
   if (fields.notes !== undefined) patch.notes = fields.notes;
   if (Object.keys(patch).length === 0) return;
@@ -196,11 +210,13 @@ export async function updateCollectionItem(
 
 /** Правит общий кэш игры (games) — название, год, число игроков, время, описание. */
 export async function updateGameInfo(
-  supabase: SupabaseClient,
+  supabase: DB,
   bggId: number,
   info: GameInfoUpdate
 ): Promise<void> {
-  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const patch: Database["public"]["Tables"]["games"]["Update"] = {
+    updated_at: new Date().toISOString(),
+  };
   if (info.name !== undefined) patch.name = info.name;
   if (info.yearPublished !== undefined) patch.year_published = info.yearPublished;
   if (info.minPlayers !== undefined) patch.min_players = info.minPlayers;
@@ -217,7 +233,7 @@ export async function updateGameInfo(
 
 /** Одна игра из коллекции по bggId (для страницы игры). */
 export async function getCollectionGame(
-  supabase: SupabaseClient,
+  supabase: DB,
   collectionId: string,
   bggId: number
 ): Promise<CollectionGame | null> {
@@ -229,11 +245,11 @@ export async function getCollectionGame(
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  return mapRow(data as Record<string, unknown>);
+  return mapRow(data);
 }
 
 export async function listCollection(
-  supabase: SupabaseClient,
+  supabase: DB,
   collectionId: string
 ): Promise<CollectionGame[]> {
   const { data, error } = await supabase
@@ -243,7 +259,7 @@ export async function listCollection(
     .order("added_at", { ascending: false });
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+  return (data ?? []).map(mapRow);
 }
 
 /** Совпадение из нашей БД по основному или альтернативному названию. */
@@ -264,7 +280,7 @@ export interface LocalGameMatch {
  * (например, демо-режим) возвращает пустой список, и вызывающий код откатывается
  * на поиск BGG. */
 export async function searchLocalGames(
-  supabase: SupabaseClient,
+  supabase: DB,
   queries: string[],
   limit = 4
 ): Promise<LocalGameMatch[]> {
@@ -280,15 +296,15 @@ export async function searchLocalGames(
       console.error(`[search_games] «${q}»:`, error.message);
       continue;
     }
-    for (const row of (data ?? []) as Record<string, unknown>[]) {
-      const bggId = row.bgg_id as number | null;
+    for (const row of data ?? []) {
+      const bggId = row.bgg_id;
       if (bggId == null || seen.has(bggId)) continue;
       seen.add(bggId);
       out.push({
         bggId,
-        name: row.name as string,
-        yearPublished: (row.year_published as number | null) ?? null,
-        thumbnailUrl: (row.thumbnail_url as string | null) ?? null,
+        name: row.name,
+        yearPublished: row.year_published ?? null,
+        thumbnailUrl: row.thumbnail_url ?? null,
       });
       if (out.length >= limit) return out;
     }
@@ -301,7 +317,7 @@ export async function searchLocalGames(
  *  иначе RLS отдал бы ещё и чужие публичные коллекции и коллекции друзей.
  *  Имя коллекции приходит из joined-select. */
 export async function listAllGames(
-  supabase: SupabaseClient
+  supabase: DB
 ): Promise<CollectionGame[]> {
   const {
     data: { user },
@@ -314,9 +330,7 @@ export async function listAllGames(
     .eq("user_id", user.id);
   if (memErr) throw new Error(memErr.message);
 
-  const ids = (memberships ?? []).map(
-    (m) => (m as { collection_id: string }).collection_id
-  );
+  const ids = (memberships ?? []).map((m) => m.collection_id);
   if (ids.length === 0) return [];
 
   const { data, error } = await supabase
@@ -326,5 +340,5 @@ export async function listAllGames(
     .order("added_at", { ascending: false });
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+  return (data ?? []).map(mapRow);
 }
