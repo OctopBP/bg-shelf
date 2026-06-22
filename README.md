@@ -54,7 +54,19 @@ npm run dev
 
 Откройте [http://localhost:3000](http://localhost:3000), зарегистрируйтесь и пользуйтесь.
 
-## Демо-режим (запуск вообще без бэкенда)
+## Локальная разработка (канон)
+
+Канон локальной разработки/демо — **локальный Supabase + seed** (см.
+[`docs/architecture.md`](docs/architecture.md) §3): `supabase start` → `supabase
+db reset` применяет миграции и [`supabase/seed.sql`](supabase/seed.sql)
+(демо-вход `demo@boardgames.local` / `demo1234`). Конвенция data-слоя
+(route handlers) — там же, §1.
+
+## Демо-режим (MSW, deprecated)
+
+> **Deprecated.** MSW-мок заморожен в пользу локального Supabase (см. выше).
+> Новых хендлеров под фичи не добавляем; удаление — после валидации seed-пути.
+> Пока оставлен рабочим как офлайн-мост.
 
 Чтобы запустить приложение полностью офлайн — **без Supabase и без ключей** — включите один флаг в `.env.local`:
 
