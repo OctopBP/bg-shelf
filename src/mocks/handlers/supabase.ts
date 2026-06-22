@@ -466,6 +466,31 @@ const restHandlers = [
     return HttpResponse.json([], { status: 201 });
   }),
 
+  // RPC: cache_game — пополнение каталога обычным пользователем (SECURITY DEFINER
+  // в реальной БД; здесь просто кладём игру в стор). Параметры приходят с префиксом p_.
+  http.post("*/rest/v1/rpc/cache_game", async ({ request }) => {
+    const p = (await request.json()) as Record<string, unknown>;
+    const record: GameRecord = {
+      bgg_id: Number(p.p_bgg_id),
+      name: String(p.p_name),
+      original_name: (p.p_original_name as string | undefined) ?? null,
+      year_published: (p.p_year_published as number | undefined) ?? null,
+      image_url: (p.p_image_url as string | undefined) ?? null,
+      thumbnail_url: (p.p_thumbnail_url as string | undefined) ?? null,
+      min_players: (p.p_min_players as number | undefined) ?? null,
+      max_players: (p.p_max_players as number | undefined) ?? null,
+      playing_time: (p.p_playing_time as number | undefined) ?? null,
+      rating: (p.p_rating as number | undefined) ?? null,
+      weight: (p.p_weight as number | undefined) ?? null,
+      description: (p.p_description as string | undefined) ?? null,
+      categories: (p.p_categories as string[] | undefined) ?? [],
+      mechanics: (p.p_mechanics as string[] | undefined) ?? [],
+      updated_at: new Date().toISOString(),
+    };
+    upsertGame(record);
+    return HttpResponse.json(record);
+  }),
+
   // patch games cache (manual edits to shared game info)
   http.patch("*/rest/v1/games", async ({ request }) => {
     const url = new URL(request.url);

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseBody } from "@/lib/api/validation";
 import {
   getFriendData,
   getMyUsername,
@@ -7,6 +9,9 @@ import {
   acceptFriendRequest,
   removeFriendship,
 } from "@/lib/friends";
+
+const PostSchema = z.object({ username: z.string() });
+const IdSchema = z.object({ id: z.string().min(1, "Не указан запрос") });
 
 async function requireUser() {
   const supabase = await createClient();
@@ -36,10 +41,10 @@ export async function GET() {
 export async function POST(request: Request) {
   const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
-  const body = await request.json().catch(() => null);
-  const username = typeof body?.username === "string" ? body.username : "";
+  const { data, error: badBody } = await parseBody(PostSchema, request);
+  if (badBody) return badBody;
   try {
-    const result = await sendFriendRequest(supabase, user.id, username);
+    const result = await sendFriendRequest(supabase, user.id, data.username);
     return NextResponse.json({ result });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -51,11 +56,10 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
-  const body = await request.json().catch(() => null);
-  const id = typeof body?.id === "string" ? body.id : "";
-  if (!id) return NextResponse.json({ error: "Не указан запрос" }, { status: 400 });
+  const { data, error: badBody } = await parseBody(IdSchema, request);
+  if (badBody) return badBody;
   try {
-    await acceptFriendRequest(supabase, id);
+    await acceptFriendRequest(supabase, data.id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -67,11 +71,10 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const { supabase, user } = await requireUser();
   if (!user) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
-  const body = await request.json().catch(() => null);
-  const id = typeof body?.id === "string" ? body.id : "";
-  if (!id) return NextResponse.json({ error: "Не указан запрос" }, { status: 400 });
+  const { data, error: badBody } = await parseBody(IdSchema, request);
+  if (badBody) return badBody;
   try {
-    await removeFriendship(supabase, id);
+    await removeFriendship(supabase, data.id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";

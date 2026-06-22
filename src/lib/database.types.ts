@@ -564,6 +564,62 @@ export type Database = {
         }
       }
       are_friends: { Args: { other: string }; Returns: boolean }
+      cache_game: {
+        Args: {
+          p_bgg_id: number
+          p_categories?: string[]
+          p_description?: string
+          p_image_url?: string
+          p_max_players?: number
+          p_mechanics?: string[]
+          p_min_players?: number
+          p_name: string
+          p_original_name?: string
+          p_playing_time?: number
+          p_rating?: number
+          p_thumbnail_url?: string
+          p_weight?: number
+          p_year_published?: number
+        }
+        Returns: {
+          best_players: string | null
+          bgg_average: number | null
+          bgg_bayes_average: number | null
+          bgg_id: number | null
+          bgg_rank: number | null
+          bgg_users_rated: number | null
+          categories: string[] | null
+          description: string | null
+          families: string[]
+          id: number
+          image_url: string | null
+          is_expansion: boolean
+          max_players: number | null
+          max_playtime: number | null
+          mechanics: string[] | null
+          min_age: number | null
+          min_players: number | null
+          min_playtime: number | null
+          name: string
+          original_name: string | null
+          playing_time: number | null
+          rating: number | null
+          recommended_players: string | null
+          source: string
+          subcategory_ranks: Json
+          thumbnail_url: string | null
+          type: string | null
+          updated_at: string
+          weight: number | null
+          year_published: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "games"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       collection_member_emails: {
         Args: { cid: string }
         Returns: {

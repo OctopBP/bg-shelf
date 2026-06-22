@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import {
-  listCollections,
-  createCollection,
-  type CollectionVisibility,
-} from "@/lib/collections";
+import { parseBody } from "@/lib/api/validation";
+import { listCollections, createCollection } from "@/lib/collections";
 
-const VISIBILITIES: CollectionVisibility[] = ["public", "friends", "private"];
+const PostSchema = z.object({
+  name: z.string().trim().min(1, "Не указано название"),
+  visibility: z.enum(["public", "friends", "private"]).default("public"),
+});
 
 async function requireUser() {
   const supabase = await createClient();
@@ -37,16 +38,14 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
-  const body = await request.json().catch(() => null);
-  const name = typeof body?.name === "string" ? body.name.trim() : "";
-  if (!name) {
-    return NextResponse.json({ error: "Не указано название" }, { status: 400 });
-  }
-  const visibility: CollectionVisibility = VISIBILITIES.includes(body?.visibility)
-    ? body.visibility
-    : "public";
+  const { data, error: badBody } = await parseBody(PostSchema, request);
+  if (badBody) return badBody;
   try {
-    const collection = await createCollection(supabase, name, visibility);
+    const collection = await createCollection(
+      supabase,
+      data.name,
+      data.visibility
+    );
     return NextResponse.json({ collection });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";

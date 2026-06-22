@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseBody } from "@/lib/api/validation";
 import {
   renameCollection,
   deleteCollection,
   setCollectionVisibility,
-  type CollectionVisibility,
 } from "@/lib/collections";
 
-const VISIBILITIES: CollectionVisibility[] = ["public", "friends", "private"];
+const PatchSchema = z
+  .object({
+    name: z.string().trim().min(1, "Не указано название").optional(),
+    visibility: z.enum(["public", "friends", "private"]).optional(),
+  })
+  .refine((b) => b.name !== undefined || b.visibility !== undefined, {
+    message: "Нечего обновлять",
+  });
 
 async function requireUser() {
   const supabase = await createClient();
@@ -27,29 +35,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   const { id } = await params;
-  const body = await request.json().catch(() => null);
-
-  const name =
-    body?.name === undefined ? undefined : String(body.name ?? "").trim();
-  const visibility =
-    body?.visibility === undefined
-      ? undefined
-      : (body.visibility as CollectionVisibility);
-
-  if (name !== undefined && !name) {
-    return NextResponse.json({ error: "Не указано название" }, { status: 400 });
-  }
-  if (visibility !== undefined && !VISIBILITIES.includes(visibility)) {
-    return NextResponse.json({ error: "Недопустимая видимость" }, { status: 400 });
-  }
-  if (name === undefined && visibility === undefined) {
-    return NextResponse.json({ error: "Нечего обновлять" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(PatchSchema, request);
+  if (badBody) return badBody;
 
   try {
-    if (name !== undefined) await renameCollection(supabase, id, name);
-    if (visibility !== undefined) {
-      await setCollectionVisibility(supabase, id, visibility);
+    if (data.name !== undefined) await renameCollection(supabase, id, data.name);
+    if (data.visibility !== undefined) {
+      await setCollectionVisibility(supabase, id, data.visibility);
     }
     return NextResponse.json({ ok: true });
   } catch (e) {

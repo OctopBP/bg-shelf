@@ -95,25 +95,28 @@ export async function addGameToCollection(
   }
   console.log(`[collection] детали из BGG: «${details.name}» (${details.yearPublished})`);
 
-  const { error: gameError } = await supabase.from("games").upsert({
-    bgg_id: details.bggId,
-    name: details.name,
-    original_name: details.originalName,
-    year_published: details.yearPublished,
-    image_url: details.imageUrl,
-    thumbnail_url: details.thumbnailUrl,
-    min_players: details.minPlayers,
-    max_players: details.maxPlayers,
-    playing_time: details.playingTime,
-    rating: details.rating,
-    weight: details.weight,
-    description: details.description,
-    categories: details.categories,
-    mechanics: details.mechanics,
-    updated_at: new Date().toISOString(),
+  // Кэш игр закрыт на прямую запись (RLS — только админ). Обычный пользователь
+  // пополняет каталог через SECURITY DEFINER функцию cache_game: она лишь
+  // ВСТАВЛЯЕТ отсутствующую игру и никогда не перезаписывает существующую
+  // запись (защита от вандализма). См. миграцию 20260622150000.
+  const { error: gameError } = await supabase.rpc("cache_game", {
+    p_bgg_id: details.bggId,
+    p_name: details.name,
+    p_original_name: details.originalName ?? undefined,
+    p_year_published: details.yearPublished ?? undefined,
+    p_image_url: details.imageUrl ?? undefined,
+    p_thumbnail_url: details.thumbnailUrl ?? undefined,
+    p_min_players: details.minPlayers ?? undefined,
+    p_max_players: details.maxPlayers ?? undefined,
+    p_playing_time: details.playingTime ?? undefined,
+    p_rating: details.rating ?? undefined,
+    p_weight: details.weight ?? undefined,
+    p_description: details.description ?? undefined,
+    p_categories: details.categories,
+    p_mechanics: details.mechanics,
   });
   if (gameError) {
-    console.error(`[collection] upsert games упал:`, gameError);
+    console.error(`[collection] cache_game упал:`, gameError);
     throw new Error(`Не удалось сохранить игру: ${gameError.message}`);
   }
 

@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseBody } from "@/lib/api/validation";
 import { runCollectionAgent } from "@/lib/agent";
 import { parseAddCommand, buildProposal } from "@/lib/resolve";
 
 export const maxDuration = 120;
+
+const PostSchema = z.object({
+  command: z.string().trim().min(1, "Пустая команда"),
+  collectionId: z.string().min(1, "Не указана коллекция"),
+});
 
 export async function POST(request: Request) {
   const reqId = crypto.randomUUID().slice(0, 8);
@@ -26,22 +33,13 @@ export async function POST(request: Request) {
   }
   console.log(`[command ${reqId}] пользователь: ${user.id}`);
 
-  const body = await request.json().catch((e) => {
-    console.error(`[command ${reqId}] не удалось распарсить JSON тела:`, e);
-    return null;
-  });
-  const command = body?.command;
-  if (typeof command !== "string" || !command.trim()) {
-    console.warn(
-      `[command ${reqId}] пустая/невалидная команда (тип ${typeof command}) → 400`
-    );
-    return NextResponse.json({ error: "Пустая команда" }, { status: 400 });
+  const { data: parsedBody, error: badBody } = await parseBody(PostSchema, request);
+  if (badBody) {
+    console.warn(`[command ${reqId}] невалидное тело → 400`);
+    return badBody;
   }
-  const collectionId = body?.collectionId;
-  if (typeof collectionId !== "string" || !collectionId) {
-    console.warn(`[command ${reqId}] не указана коллекция → 400`);
-    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
-  }
+  const command = parsedBody.command;
+  const collectionId = parsedBody.collectionId;
   console.log(`[command ${reqId}] команда: «${command.trim()}» в коллекции ${collectionId}`);
 
   try {

@@ -50,32 +50,38 @@
 ### 1.1. Закрыть запись в глобальный каталог игр
 Сейчас `games`, `game_names`, `contributors`, `game_contributors`, `game_links`
 доступны на insert/update/delete любому `authenticated` — вектор вандализма.
-- [ ] **S-1** Новая миграция: для каталожных таблиц оставить `select` всем
-  authenticated; `insert/update/delete` — только `is_admin(auth.uid())` или
-  `service_role`.
-- [ ] **S-2** Импорт-скрипт (`scripts/import-games.mjs`) уже умеет
-  service_role — проверить, что он не зависит от пользовательских политик.
-- [ ] **S-3** Пользовательское пополнение кэша из BGG (`addGameToCollection` →
-  `upsert games`): решить, как сохранить (вариант — `SECURITY DEFINER` RPC
-  `cache_game(...)`, который пишет в `games` от имени системы, а не открытая
-  RLS на запись).
+- [x] **S-1** Миграция `20260622150000_phase1_security.sql`: для каталожных
+  таблиц `select` остаётся всем authenticated; `insert/update/delete` — только
+  `is_admin(auth.uid())` (service_role обходит RLS). Применено на remote.
+- [x] **S-2** Импорт-скрипт в этом репозитории отсутствует (`scripts/import-games.mjs`
+  живёт в `bg-preorders-scraper` и пишет через `service_role`, который полностью
+  обходит RLS) — от пользовательских политик не зависит, менять нечего.
+- [x] **S-3** `addGameToCollection` пишет не напрямую в `games`, а через
+  `SECURITY DEFINER` RPC `cache_game(...)` (insert + `on conflict do nothing`,
+  без перезаписи каталога). Мок-хендлер добавлен; добавление в коллекцию работает.
 
 **DoD:** обычный пользователь не может изменить/удалить запись каталога; добавление
 игры в коллекцию по-прежнему работает.
 
 ### 1.2. Сузить утечки в `profiles` и публичные политики
-- [ ] **S-4** `profiles` не должен отдавать `role` всем. Сделать вью/RPC только
-  с публичными полями (`id`, `username`) или ограничить колонки политикой.
-- [ ] **S-5** Подтвердить намеренность публичного (для анонимов) чтения
-  `preorders`/`publishers` (политики без `to authenticated`). Если каталог
-  публичный — оставить и задокументировать; иначе добавить `to authenticated`.
+- [x] **S-4** `profiles`: колоночные привилегии — `grant select (id, username)`
+  и `grant update (username)`. `role` скрыта от обычных пользователей. Заодно
+  закрыта эскалация привилегий: прежняя update-политика разрешала менять любую
+  колонку своей строки (включая `role`) — теперь только `username`.
+- [x] **S-5** Публичное (anon) чтение `preorders`/`publishers` подтверждено как
+  намеренное (публичный каталог): оставлено и задокументировано в `comment on
+  policy …` + `docs/database.md` §4. Живо проверено: anon GET → 200.
 
 **DoD:** `role` не виден обычным пользователям; решение по публичности предзаказов
 зафиксировано в комментарии к политике.
 
 ### 1.3. Базовая валидация входов API
-- [ ] **S-6** Единый zod-слой для тел всех API-роутов (сейчас zod только в
-  `resolve`). Хелпер `parseBody(schema, request)` с 400 при ошибке.
+- [x] **S-6** Хелпер `parseBody(schema, request)` (`src/lib/api/validation.ts`)
+  возвращает 400 при невалидном JSON/несоответствии схеме. Применён ко всем
+  роутам с телом: `collection` (POST/PUT/PATCH/DELETE), `collections` (POST),
+  `collections/[id]` (PATCH), `collections/[id]/members` (POST/DELETE),
+  `friends` (POST/PATCH/DELETE), `profile` (PATCH), `command` (POST).
+  (`photo` — multipart, валидирует тип/размер файла отдельно.)
 
 **DoD:** каждый POST/PATCH-роут валидирует тело через zod.
 

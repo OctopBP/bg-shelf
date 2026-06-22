@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseBody } from "@/lib/api/validation";
 import {
   addGameToCollection,
   removeGameFromCollection,
@@ -12,6 +14,50 @@ import {
 } from "@/lib/collection";
 
 export const maxDuration = 120;
+
+const PostSchema = z.object({
+  collectionId: z.string().min(1, "Не указана коллекция"),
+  items: z
+    .array(
+      z.object({
+        bggId: z.coerce.number().int().positive(),
+        tags: z.array(z.string()).optional(),
+      })
+    )
+    .min(1, "Список игр пуст"),
+});
+
+const DeleteSchema = z.object({
+  collectionId: z.string().min(1, "Не указана коллекция"),
+  bggId: z.coerce.number().int().positive("Не указан bggId"),
+});
+
+const PutSchema = z.object({
+  toCollectionId: z.string().min(1, "Не указана коллекция"),
+  items: z
+    .array(
+      z.object({
+        fromCollectionId: z.string(),
+        bggId: z.coerce.number().int().positive(),
+      })
+    )
+    .optional(),
+  fromCollectionId: z.string().optional(),
+  bggId: z.coerce.number().int().positive().optional(),
+});
+
+const PatchSchema = z
+  .object({
+    collectionId: z.string().min(1, "Не указана коллекция"),
+    bggId: z.coerce.number().int().positive("Не указан bggId"),
+    tags: z.array(z.string()).optional(),
+    notes: z.string().nullable().optional(),
+    info: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine(
+    (b) => b.tags !== undefined || b.notes !== undefined || b.info !== undefined,
+    { message: "Нечего обновлять" }
+  );
 
 /** Игры одной коллекции (?collectionId=…) или всех коллекций (?all=1). */
 export async function GET(request: NextRequest) {
@@ -53,24 +99,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const collectionId = body?.collectionId;
-  if (typeof collectionId !== "string" || !collectionId) {
-    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
-  }
-  const items: Array<{ bggId: number; tags?: string[] }> = body?.items;
-  if (!Array.isArray(items) || items.length === 0) {
-    return NextResponse.json({ error: "Список игр пуст" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(PostSchema, request);
+  if (badBody) return badBody;
 
   const added: string[] = [];
   const failed: number[] = [];
-  for (const item of items) {
+  for (const item of data.items) {
     try {
       const { name } = await addGameToCollection(
         supabase,
-        collectionId,
-        Number(item.bggId),
+        data.collectionId,
+        item.bggId,
         item.tags ?? [],
         user.id
       );
@@ -92,18 +131,11 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const collectionId = body?.collectionId;
-  if (typeof collectionId !== "string" || !collectionId) {
-    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
-  }
-  const bggId = Number(body?.bggId);
-  if (!bggId) {
-    return NextResponse.json({ error: "Не указан bggId" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(DeleteSchema, request);
+  if (badBody) return badBody;
 
   try {
-    await removeGameFromCollection(supabase, collectionId, bggId);
+    await removeGameFromCollection(supabase, data.collectionId, data.bggId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -124,23 +156,18 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const toCollectionId = body?.toCollectionId;
-  if (typeof toCollectionId !== "string" || !toCollectionId) {
-    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(PutSchema, request);
+  if (badBody) return badBody;
+  const toCollectionId = data.toCollectionId;
 
-  // Нормализуем вход в список { fromCollectionId, bggId }.
-  const rawItems: Array<{ fromCollectionId?: unknown; bggId?: unknown }> =
-    Array.isArray(body?.items)
-      ? body.items
-      : [{ fromCollectionId: body?.fromCollectionId, bggId: body?.bggId }];
+  // Нормализуем вход в список { from, bggId }: либо массив items, либо одиночные
+  // поля fromCollectionId/bggId.
+  const rawItems =
+    data.items ??
+    [{ fromCollectionId: data.fromCollectionId, bggId: data.bggId }];
 
   const moves = rawItems
-    .map((it) => ({
-      from: typeof it.fromCollectionId === "string" ? it.fromCollectionId : "",
-      bggId: Number(it.bggId),
-    }))
+    .map((it) => ({ from: it.fromCollectionId ?? "", bggId: it.bggId ?? 0 }))
     .filter((m) => m.from && m.bggId);
 
   if (moves.length === 0) {
@@ -170,41 +197,26 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const collectionId = body?.collectionId;
-  if (typeof collectionId !== "string" || !collectionId) {
-    return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
-  }
-  const bggId = Number(body?.bggId);
-  if (!bggId) {
-    return NextResponse.json({ error: "Не указан bggId" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(PatchSchema, request);
+  if (badBody) return badBody;
 
-  const tags: string[] | undefined = Array.isArray(body?.tags)
-    ? body.tags.map((t: unknown) => String(t).trim().toLowerCase()).filter(Boolean)
+  const tags: string[] | undefined = data.tags
+    ? data.tags.map((t) => t.trim().toLowerCase()).filter(Boolean)
     : undefined;
-  const notes: string | undefined =
-    body?.notes === undefined ? undefined : String(body.notes ?? "");
-  const info: GameInfoUpdate | undefined = body?.info
-    ? sanitizeInfo(body.info)
+  const notes = data.notes;
+  const info: GameInfoUpdate | undefined = data.info
+    ? sanitizeInfo(data.info)
     : undefined;
-
-  if (tags === undefined && notes === undefined && info === undefined) {
-    return NextResponse.json(
-      { error: "Нечего обновлять" },
-      { status: 400 }
-    );
-  }
 
   try {
     if (tags !== undefined || notes !== undefined) {
-      await updateCollectionItem(supabase, collectionId, bggId, {
+      await updateCollectionItem(supabase, data.collectionId, data.bggId, {
         tags,
         notes: notes === undefined ? undefined : notes || null,
       });
     }
     if (info) {
-      await updateGameInfo(supabase, bggId, info);
+      await updateGameInfo(supabase, data.bggId, info);
     }
     return NextResponse.json({ ok: true });
   } catch (e) {

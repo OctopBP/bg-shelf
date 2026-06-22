@@ -1,12 +1,27 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseBody } from "@/lib/api/validation";
 import {
   listMembers,
   shareCollection,
   shareCollectionWithUser,
   removeMember,
-  type CollectionRole,
 } from "@/lib/collections";
+
+const PostSchema = z
+  .object({
+    email: z.string().trim().optional().default(""),
+    userId: z.string().trim().optional().default(""),
+    role: z.enum(["editor", "viewer"]).default("editor"),
+  })
+  .refine((b) => Boolean(b.email) || Boolean(b.userId), {
+    message: "Не указан получатель",
+  });
+
+const DeleteSchema = z.object({
+  userId: z.string().min(1, "Не указан пользователь"),
+});
 
 async function requireUser() {
   const supabase = await createClient();
@@ -45,19 +60,13 @@ export async function POST(
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   const { id } = await params;
-  const body = await request.json().catch(() => null);
-  const email = typeof body?.email === "string" ? body.email.trim() : "";
-  const userId = typeof body?.userId === "string" ? body.userId.trim() : "";
-  const role: Exclude<CollectionRole, "owner"> =
-    body?.role === "viewer" ? "viewer" : "editor";
-  if (!email && !userId) {
-    return NextResponse.json({ error: "Не указан получатель" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(PostSchema, request);
+  if (badBody) return badBody;
   try {
-    if (userId) {
-      await shareCollectionWithUser(supabase, id, userId, role);
+    if (data.userId) {
+      await shareCollectionWithUser(supabase, id, data.userId, data.role);
     } else {
-      await shareCollection(supabase, id, email, role);
+      await shareCollection(supabase, id, data.email, data.role);
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
@@ -76,13 +85,10 @@ export async function DELETE(
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   const { id } = await params;
-  const body = await request.json().catch(() => null);
-  const userId = typeof body?.userId === "string" ? body.userId : "";
-  if (!userId) {
-    return NextResponse.json({ error: "Не указан пользователь" }, { status: 400 });
-  }
+  const { data, error: badBody } = await parseBody(DeleteSchema, request);
+  if (badBody) return badBody;
   try {
-    await removeMember(supabase, id, userId);
+    await removeMember(supabase, id, data.userId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
