@@ -13,6 +13,8 @@ export interface BggSearchResult {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  /** BGG-тип записи — дополнение (boardgameexpansion) или базовая игра. */
+  isExpansion: boolean;
 }
 
 export interface BggExpansion {
@@ -144,8 +146,10 @@ async function rawSearch(
   query: string,
   exact: boolean
 ): Promise<BggSearchResult[]> {
+  // Ищем и базовые игры, и дополнения: тогда «Каркассон» в кандидатах
+  // соседствует со своими дополнениями, а UI помечает их по isExpansion.
   const xml = await bggFetch(
-    `/search?query=${encodeURIComponent(query)}&type=boardgame${
+    `/search?query=${encodeURIComponent(query)}&type=boardgame,boardgameexpansion${
       exact ? "&exact=1" : ""
     }`
   );
@@ -159,6 +163,7 @@ async function rawSearch(
       bggId: Number(item["@_id"]),
       name: nameNode?.["@_value"] ?? "Unknown",
       yearPublished: yearNode ? Number(yearNode["@_value"]) : null,
+      isExpansion: item["@_type"] === "boardgameexpansion",
     };
   });
 }

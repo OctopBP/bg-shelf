@@ -4,7 +4,7 @@ import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { logger } from "./logger";
 import { searchBgg, getBggGameDetails } from "./bgg";
-import { searchLocalGames } from "./collection";
+import { searchLocalGames, getLocalThumbnails } from "./collection";
 
 // Разбор намерения — это классификация + извлечение полей со структурированным
 // выходом (zod). Haiku 4.5 справляется и кратно дешевле/быстрее Opus (P-6).
@@ -106,11 +106,15 @@ export interface ResolvedCandidate {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  /** true — это дополнение, а не базовая игра. */
+  isExpansion: boolean;
 }
 
 export interface ResolvedExpansion {
   bggId: number;
   name: string;
+  /** Обложка — только если дополнение уже есть в нашей БД (иначе null). */
+  thumbnailUrl: string | null;
 }
 
 /** Одна запрошенная игра с кандидатами BGG и дополнениями лучшего кандидата. */
@@ -160,6 +164,7 @@ export async function buildProposal(
           bggId: m.bggId,
           name: m.name,
           yearPublished: m.yearPublished,
+          isExpansion: m.isExpansion,
         });
       }
     } catch (e) {
@@ -176,6 +181,7 @@ export async function buildProposal(
             bggId: c.bggId,
             name: c.name,
             yearPublished: c.yearPublished,
+            isExpansion: c.isExpansion,
           });
           if (candidates.length >= MAX_CANDIDATES) break;
         }
@@ -193,7 +199,10 @@ export async function buildProposal(
           thumbnailUrl = details.thumbnailUrl;
           // Лучшему кандидату подставляем локализованное (русское) название.
           candidates[0] = { ...candidates[0], name: details.name };
-          expansions = details.expansions.slice(0, MAX_EXPANSIONS);
+          expansions = await enrichExpansions(
+            details.expansions.slice(0, MAX_EXPANSIONS),
+            supabase
+          );
         }
       } catch (e) {
         log(`детали для ${candidates[0].bggId} упали:`, e);
@@ -212,4 +221,23 @@ export async function buildProposal(
   }
 
   return out;
+}
+
+/** Добавляет дополнениям обложку из нашего кэша `games` — но только тем, что
+ *  уже есть в БД. За отсутствующими в каталог BGG не ходим (экономим запросы),
+ *  у них thumbnailUrl остаётся null. */
+export async function enrichExpansions(
+  expansions: Array<{ bggId: number; name: string }>,
+  supabase: SupabaseClient
+): Promise<ResolvedExpansion[]> {
+  if (expansions.length === 0) return [];
+  const thumbs = await getLocalThumbnails(
+    supabase,
+    expansions.map((e) => e.bggId)
+  );
+  return expansions.map((e) => ({
+    bggId: e.bggId,
+    name: e.name,
+    thumbnailUrl: thumbs.get(e.bggId) ?? null,
+  }));
 }

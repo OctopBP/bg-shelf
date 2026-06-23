@@ -28,8 +28,9 @@ function matchGames(query: string): MockGame[] {
 }
 
 function searchItemXml(g: MockGame): string {
+  const type = g.isExpansion ? "boardgameexpansion" : "boardgame";
   return (
-    `<item type="boardgame" id="${g.bggId}">` +
+    `<item type="${type}" id="${g.bggId}">` +
     `<name type="primary" value="${xmlEscape(g.name)}"/>` +
     (g.yearPublished !== null
       ? `<yearpublished value="${g.yearPublished}"/>`

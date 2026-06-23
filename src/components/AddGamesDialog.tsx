@@ -17,11 +17,13 @@ export interface ResolvedCandidate {
   bggId: number;
   name: string;
   yearPublished: number | null;
+  isExpansion: boolean;
 }
 
 export interface ResolvedExpansion {
   bggId: number;
   name: string;
+  thumbnailUrl: string | null;
 }
 
 export interface ResolvedGame {
@@ -333,15 +335,29 @@ export default function AddGamesDialog({
                                   key={c.bggId}
                                   type="button"
                                   onClick={() => selectCandidate(i, c.bggId)}
-                                  className={`rounded-full border-2 px-2.5 py-0.5 text-xs font-bold transition ${
+                                  className={`inline-flex items-center gap-1 rounded-full border-2 px-2.5 py-0.5 text-xs font-bold transition ${
                                     active
                                       ? "border-ink bg-ink text-white"
                                       : "border-ink/30 text-ink/70 hover:border-ink"
                                   }`}
-                                  title={c.name}
+                                  title={
+                                    c.isExpansion ? `Дополнение: ${c.name}` : c.name
+                                  }
                                 >
-                                  {c.name}
-                                  {c.yearPublished ? ` (${c.yearPublished})` : ""}
+                                  {c.isExpansion && (
+                                    <IconPuzzle
+                                      size={13}
+                                      stroke={2.5}
+                                      className="shrink-0 opacity-80"
+                                      aria-label="дополнение"
+                                    />
+                                  )}
+                                  <span>
+                                    {c.name}
+                                    {c.yearPublished
+                                      ? ` (${c.yearPublished})`
+                                      : ""}
+                                  </span>
                                 </button>
                               );
                             })}
@@ -433,7 +449,7 @@ export default function AddGamesDialog({
                     {d?.loading ? (
                       <p className="text-xs text-ink/40">Загружаю…</p>
                     ) : (
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="space-y-1.5">
                         {expansions.map((exp) => {
                           const chosen = s.chosenExpansions.has(exp.bggId);
                           return (
@@ -441,20 +457,43 @@ export default function AddGamesDialog({
                               key={exp.bggId}
                               type="button"
                               onClick={() => toggleExpansion(i, exp.bggId)}
-                              className={`inline-flex items-center gap-1 rounded-full border-2 px-2.5 py-1 text-xs font-semibold transition ${
+                              className={`flex w-full items-center gap-2.5 rounded-xl border-2 p-1.5 text-left transition ${
                                 chosen
-                                  ? "border-ink bg-brand text-white"
-                                  : "border-ink/30 text-ink/70 hover:border-ink"
+                                  ? "border-ink bg-brand/15"
+                                  : "border-ink/20 hover:border-ink"
                               }`}
                               title={exp.name}
                             >
-                              {chosen ? (
-                                <IconCheck size={12} stroke={3} />
-                              ) : (
-                                <IconPlus size={12} stroke={3} />
-                              )}
-                              <span className="max-w-[14rem] truncate">
+                              {/* Превью дополнения — как у основной игры */}
+                              <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg border-2 border-ink bg-brand-soft">
+                                {exp.thumbnailUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={exp.thumbnailUrl}
+                                    alt={exp.name}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="flex h-full w-full items-center justify-center text-ink/30">
+                                    <IconPuzzle size={20} />
+                                  </span>
+                                )}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">
                                 {exp.name}
+                              </span>
+                              <span
+                                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-ink ${
+                                  chosen
+                                    ? "bg-brand text-white"
+                                    : "text-ink/50"
+                                }`}
+                              >
+                                {chosen ? (
+                                  <IconCheck size={13} stroke={3} />
+                                ) : (
+                                  <IconPlus size={13} stroke={3} />
+                                )}
                               </span>
                             </button>
                           );

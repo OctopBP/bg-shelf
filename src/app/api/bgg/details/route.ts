@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBggGameDetails } from "@/lib/bgg";
+import { enrichExpansions } from "@/lib/resolve";
 
 // Один запрос деталей к BGG с 202-ретраями — 60с с запасом хватает.
 export const maxDuration = 60;
@@ -26,11 +27,15 @@ export async function GET(request: NextRequest) {
     if (!details) {
       return NextResponse.json({ error: "Игра не найдена" }, { status: 404 });
     }
+    const expansions = await enrichExpansions(
+      details.expansions.slice(0, 8),
+      supabase
+    );
     return NextResponse.json({
       name: details.name,
       yearPublished: details.yearPublished,
       thumbnailUrl: details.thumbnailUrl,
-      expansions: details.expansions.slice(0, 8),
+      expansions,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";

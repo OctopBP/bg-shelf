@@ -16,6 +16,8 @@ export interface MockGame
   nameRu?: string;
   /** Дополнения — отдаются как ссылки boardgameexpansion в thing-ответе. */
   expansions?: { bggId: number; name: string }[];
+  /** Сама запись — дополнение (BGG-тип boardgameexpansion). */
+  isExpansion?: boolean;
 }
 
 // Заглушки обложек — самодостаточные inline-SVG в палитре приложения
@@ -351,6 +353,7 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Tile Placement"],
     aliases: ["трактиры и соборы", "inns and cathedrals"],
     nameRu: "Каркассон: Трактиры и соборы",
+    isExpansion: true,
   },
   {
     bggId: 5405,
@@ -368,6 +371,7 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Tile Placement"],
     aliases: ["торговцы и строители", "traders and builders"],
     nameRu: "Каркассон: Торговцы и строители",
+    isExpansion: true,
   },
   {
     bggId: 325,
@@ -385,6 +389,7 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Dice Rolling", "Modular Board"],
     aliases: ["мореходы", "seafarers"],
     nameRu: "Колонизаторы: Мореходы",
+    isExpansion: true,
   },
   {
     bggId: 926,
@@ -402,5 +407,6 @@ export const MOCK_GAMES: MockGame[] = [
     mechanics: ["Dice Rolling", "Modular Board"],
     aliases: ["города и рыцари", "cities and knights"],
     nameRu: "Колонизаторы: Города и рыцари",
+    isExpansion: true,
   },
 ];

@@ -316,6 +316,7 @@ export interface LocalGameMatch {
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;
+  isExpansion: boolean;
 }
 
 /**
@@ -353,8 +354,38 @@ export async function searchLocalGames(
         name: row.name,
         yearPublished: row.year_published ?? null,
         thumbnailUrl: row.thumbnail_url ?? null,
+        isExpansion: row.is_expansion ?? false,
       });
       if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Обложки игр из нашего кэша `games` по bgg_id. Возвращает только то, что уже
+ * есть в БД — без обращений к BGG. Используется, чтобы показать превью
+ * дополнений, не делая лишних запросов за теми, которых в каталоге ещё нет.
+ */
+export async function getLocalThumbnails(
+  supabase: DB,
+  bggIds: number[]
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const ids = [...new Set(bggIds)].filter((id) => Number.isFinite(id));
+  if (ids.length === 0) return out;
+
+  const { data, error } = await supabase
+    .from("games")
+    .select("bgg_id, thumbnail_url")
+    .in("bgg_id", ids);
+  if (error) {
+    logger.child("getLocalThumbnails").error(error.message);
+    return out;
+  }
+  for (const row of data ?? []) {
+    if (row.bgg_id != null && row.thumbnail_url) {
+      out.set(row.bgg_id, row.thumbnail_url);
     }
   }
   return out;

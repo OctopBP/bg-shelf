@@ -20,6 +20,7 @@ export interface GameRecord {
   description: string | null;
   categories: string[];
   mechanics: string[];
+  is_expansion: boolean;
   updated_at: string;
 }
 
@@ -106,6 +107,7 @@ function toGameRecord(g: (typeof MOCK_GAMES)[number]): GameRecord {
     description: g.description,
     categories: g.categories,
     mechanics: g.mechanics,
+    is_expansion: g.isExpansion ?? false,
     updated_at: new Date().toISOString(),
   };
 }
@@ -234,6 +236,15 @@ export function searchGames(q: string, limit = 4): GameRecord[] {
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** Игры кэша по списку bgg_id — демо-аналог `select … from games where bgg_id in (…)`
+ *  (используется для обложек дополнений в окне добавления). */
+export function gamesByIds(ids: number[]): GameRecord[] {
+  seed();
+  return ids
+    .map((id) => games.get(id))
+    .filter((g): g is GameRecord => g !== undefined);
 }
 
 // --- Collection items ------------------------------------------------------

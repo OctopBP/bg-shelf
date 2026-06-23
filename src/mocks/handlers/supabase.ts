@@ -8,6 +8,7 @@ import { DEMO_USER } from "@/lib/mock/config";
 import {
   upsertGame,
   searchGames,
+  gamesByIds,
   upsertItem,
   deleteItem,
   updateItemFields,
@@ -484,6 +485,21 @@ const restHandlers = [
     return HttpResponse.json(ownerId ? collectionsByOwner(ownerId) : []);
   }),
 
+  // games: выборка по списку bgg_id (?bgg_id=in.(…)) — обложки дополнений в окне
+  // добавления (getLocalThumbnails). Без фильтра ничего не отдаём.
+  http.get("*/rest/v1/games", ({ request }) => {
+    const url = new URL(request.url);
+    const raw = url.searchParams.get("bgg_id");
+    const ids = raw?.startsWith("in.(")
+      ? raw
+          .slice(4, -1)
+          .split(",")
+          .map((s) => Number(s.replace(/^"|"$/g, "")))
+          .filter((n) => !Number.isNaN(n))
+      : [];
+    return HttpResponse.json(ids.length ? gamesByIds(ids) : []);
+  }),
+
   // upsert games cache (one object or an array)
   http.post("*/rest/v1/games", async ({ request }) => {
     const body = await request.json();
@@ -511,6 +527,7 @@ const restHandlers = [
       description: (p.p_description as string | undefined) ?? null,
       categories: (p.p_categories as string[] | undefined) ?? [],
       mechanics: (p.p_mechanics as string[] | undefined) ?? [],
+      is_expansion: false,
       updated_at: new Date().toISOString(),
     };
     upsertGame(record);
