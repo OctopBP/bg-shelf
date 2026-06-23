@@ -7,12 +7,12 @@ export default async function GamePage({
   params,
   searchParams,
 }: {
-  params: Promise<{ bggId: string }>;
+  params: Promise<{ id: string }>;
   searchParams: Promise<{ c?: string }>;
 }) {
-  const { bggId } = await params;
+  const { id: idParam } = await params;
   const { c: collectionId } = await searchParams;
-  const id = Number(bggId);
+  const id = Number(idParam);
   if (!Number.isFinite(id) || !collectionId) notFound();
 
   const supabase = await createClient();

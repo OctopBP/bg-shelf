@@ -7,19 +7,14 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
-  }
   public: {
     Tables: {
       collection_items: {
         Row: {
           added_at: string
           added_by: string | null
-          bgg_id: number
           collection_id: string
+          game_id: number
           id: string
           notes: string | null
           tags: string[]
@@ -27,8 +22,8 @@ export type Database = {
         Insert: {
           added_at?: string
           added_by?: string | null
-          bgg_id: number
           collection_id: string
+          game_id: number
           id?: string
           notes?: string | null
           tags?: string[]
@@ -36,25 +31,25 @@ export type Database = {
         Update: {
           added_at?: string
           added_by?: string | null
-          bgg_id?: number
           collection_id?: string
+          game_id?: number
           id?: string
           notes?: string | null
           tags?: string[]
         }
         Relationships: [
           {
-            foreignKeyName: "collection_items_bgg_id_fkey"
-            columns: ["bgg_id"]
-            isOneToOne: false
-            referencedRelation: "games"
-            referencedColumns: ["bgg_id"]
-          },
-          {
             foreignKeyName: "collection_items_collection_id_fkey"
             columns: ["collection_id"]
             isOneToOne: false
             referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_items_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "games"
             referencedColumns: ["id"]
           },
         ]
@@ -115,20 +110,46 @@ export type Database = {
         }
         Relationships: []
       }
+      contributor_external_ids: {
+        Row: {
+          contributor_id: number
+          external_id: string
+          source: string
+          url: string | null
+        }
+        Insert: {
+          contributor_id: number
+          external_id: string
+          source: string
+          url?: string | null
+        }
+        Update: {
+          contributor_id?: number
+          external_id?: string
+          source?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contributor_external_ids_contributor_id_fkey"
+            columns: ["contributor_id"]
+            isOneToOne: false
+            referencedRelation: "contributors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contributors: {
         Row: {
           id: number
-          kind: string
           name: string
         }
         Insert: {
           id?: never
-          kind: string
           name: string
         }
         Update: {
           id?: never
-          kind?: string
           name?: string
         }
         Relationships: []
@@ -160,6 +181,50 @@ export type Database = {
         }
         Relationships: []
       }
+      game_bgg_stats: {
+        Row: {
+          average: number | null
+          bayes_average: number | null
+          best_players: string | null
+          game_id: number
+          rank: number | null
+          recommended_players: string | null
+          subcategory_ranks: Json
+          updated_at: string
+          users_rated: number | null
+        }
+        Insert: {
+          average?: number | null
+          bayes_average?: number | null
+          best_players?: string | null
+          game_id: number
+          rank?: number | null
+          recommended_players?: string | null
+          subcategory_ranks?: Json
+          updated_at?: string
+          users_rated?: number | null
+        }
+        Update: {
+          average?: number | null
+          bayes_average?: number | null
+          best_players?: string | null
+          game_id?: number
+          rank?: number | null
+          recommended_players?: string | null
+          subcategory_ranks?: Json
+          updated_at?: string
+          users_rated?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_bgg_stats_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: true
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_contributors: {
         Row: {
           contributor_id: number
@@ -186,6 +251,35 @@ export type Database = {
           },
           {
             foreignKeyName: "game_contributors_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      game_external_ids: {
+        Row: {
+          external_id: string
+          game_id: number
+          source: string
+          url: string | null
+        }
+        Insert: {
+          external_id: string
+          game_id: number
+          source: string
+          url?: string | null
+        }
+        Update: {
+          external_id?: string
+          game_id?: number
+          source?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_external_ids_game_id_fkey"
             columns: ["game_id"]
             isOneToOne: false
             referencedRelation: "games"
@@ -263,13 +357,9 @@ export type Database = {
       }
       games: {
         Row: {
-          best_players: string | null
-          bgg_average: number | null
-          bgg_bayes_average: number | null
           bgg_id: number | null
-          bgg_rank: number | null
-          bgg_users_rated: number | null
           categories: string[] | null
+          created_at: string
           description: string | null
           families: string[]
           id: number
@@ -285,9 +375,8 @@ export type Database = {
           original_name: string | null
           playing_time: number | null
           rating: number | null
-          recommended_players: string | null
+          slug: string | null
           source: string
-          subcategory_ranks: Json
           thumbnail_url: string | null
           type: string | null
           updated_at: string
@@ -295,13 +384,9 @@ export type Database = {
           year_published: number | null
         }
         Insert: {
-          best_players?: string | null
-          bgg_average?: number | null
-          bgg_bayes_average?: number | null
           bgg_id?: number | null
-          bgg_rank?: number | null
-          bgg_users_rated?: number | null
           categories?: string[] | null
+          created_at?: string
           description?: string | null
           families?: string[]
           id?: never
@@ -317,9 +402,8 @@ export type Database = {
           original_name?: string | null
           playing_time?: number | null
           rating?: number | null
-          recommended_players?: string | null
+          slug?: string | null
           source?: string
-          subcategory_ranks?: Json
           thumbnail_url?: string | null
           type?: string | null
           updated_at?: string
@@ -327,13 +411,9 @@ export type Database = {
           year_published?: number | null
         }
         Update: {
-          best_players?: string | null
-          bgg_average?: number | null
-          bgg_bayes_average?: number | null
           bgg_id?: number | null
-          bgg_rank?: number | null
-          bgg_users_rated?: number | null
           categories?: string[] | null
+          created_at?: string
           description?: string | null
           families?: string[]
           id?: never
@@ -349,9 +429,8 @@ export type Database = {
           original_name?: string | null
           playing_time?: number | null
           rating?: number | null
-          recommended_players?: string | null
+          slug?: string | null
           source?: string
-          subcategory_ranks?: Json
           thumbnail_url?: string | null
           type?: string | null
           updated_at?: string
@@ -424,6 +503,7 @@ export type Database = {
           currency: string
           description: string | null
           draft_id: string | null
+          game_id: number | null
           id: string
           image_url: string | null
           is_published: boolean
@@ -440,6 +520,7 @@ export type Database = {
           currency?: string
           description?: string | null
           draft_id?: string | null
+          game_id?: number | null
           id?: string
           image_url?: string | null
           is_published?: boolean
@@ -456,6 +537,7 @@ export type Database = {
           currency?: string
           description?: string | null
           draft_id?: string | null
+          game_id?: number | null
           id?: string
           image_url?: string | null
           is_published?: boolean
@@ -471,6 +553,13 @@ export type Database = {
             columns: ["draft_id"]
             isOneToOne: false
             referencedRelation: "preorder_drafts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "preorders_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "games"
             referencedColumns: ["id"]
           },
           {
@@ -561,6 +650,7 @@ export type Database = {
           currency: string
           description: string | null
           draft_id: string | null
+          game_id: number | null
           id: string
           image_url: string | null
           is_published: boolean
@@ -596,13 +686,9 @@ export type Database = {
           p_year_published?: number
         }
         Returns: {
-          best_players: string | null
-          bgg_average: number | null
-          bgg_bayes_average: number | null
           bgg_id: number | null
-          bgg_rank: number | null
-          bgg_users_rated: number | null
           categories: string[] | null
+          created_at: string
           description: string | null
           families: string[]
           id: number
@@ -618,9 +704,8 @@ export type Database = {
           original_name: string | null
           playing_time: number | null
           rating: number | null
-          recommended_players: string | null
+          slug: string | null
           source: string
-          subcategory_ranks: Json
           thumbnail_url: string | null
           type: string | null
           updated_at: string
@@ -670,13 +755,9 @@ export type Database = {
       search_games: {
         Args: { lim?: number; q: string }
         Returns: {
-          best_players: string | null
-          bgg_average: number | null
-          bgg_bayes_average: number | null
           bgg_id: number | null
-          bgg_rank: number | null
-          bgg_users_rated: number | null
           categories: string[] | null
+          created_at: string
           description: string | null
           families: string[]
           id: number
@@ -692,9 +773,8 @@ export type Database = {
           original_name: string | null
           playing_time: number | null
           rating: number | null
-          recommended_players: string | null
+          slug: string | null
           source: string
-          subcategory_ranks: Json
           thumbnail_url: string | null
           type: string | null
           updated_at: string
@@ -853,3 +933,4 @@ export const Constants = {
     },
   },
 } as const
+

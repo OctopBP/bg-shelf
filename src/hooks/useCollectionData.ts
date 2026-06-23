@@ -8,7 +8,8 @@ export interface CollectionGame {
   id: string;
   collectionId: string;
   collectionName?: string;
-  bggId: number;
+  gameId: number;
+  bggId: number | null;
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;

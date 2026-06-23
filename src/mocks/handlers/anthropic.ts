@@ -179,7 +179,7 @@ export const anthropicHandlers = [
       id: `toolu_mock_${i}_${game.bggId}`,
       name: parsed.remove ? "remove_from_collection" : "add_to_collection",
       input: parsed.remove
-        ? { bgg_id: game.bggId }
+        ? { game_id: game.bggId }
         : { bgg_id: game.bggId, tags },
     }));
     return message(toolCalls, "tool_use");

@@ -32,7 +32,7 @@ const PostSchema = z.object({
 
 const DeleteSchema = z.object({
   collectionId: z.string().min(1, "Не указана коллекция"),
-  bggId: z.coerce.number().int().positive("Не указан bggId"),
+  gameId: z.coerce.number().int().positive("Не указан gameId"),
 });
 
 const PutSchema = z.object({
@@ -41,18 +41,18 @@ const PutSchema = z.object({
     .array(
       z.object({
         fromCollectionId: z.string(),
-        bggId: z.coerce.number().int().positive(),
+        gameId: z.coerce.number().int().positive(),
       })
     )
     .optional(),
   fromCollectionId: z.string().optional(),
-  bggId: z.coerce.number().int().positive().optional(),
+  gameId: z.coerce.number().int().positive().optional(),
 });
 
 const PatchSchema = z
   .object({
     collectionId: z.string().min(1, "Не указана коллекция"),
-    bggId: z.coerce.number().int().positive("Не указан bggId"),
+    gameId: z.coerce.number().int().positive("Не указан gameId"),
     tags: z.array(z.string()).optional(),
     notes: z.string().nullable().optional(),
     info: z.record(z.string(), z.unknown()).optional(),
@@ -147,7 +147,7 @@ export async function DELETE(request: Request) {
   if (badBody) return badBody;
 
   try {
-    await removeGameFromCollection(supabase, data.collectionId, data.bggId);
+    await removeGameFromCollection(supabase, data.collectionId, data.gameId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
@@ -172,15 +172,15 @@ export async function PUT(request: Request) {
   if (badBody) return badBody;
   const toCollectionId = data.toCollectionId;
 
-  // Нормализуем вход в список { from, bggId }: либо массив items, либо одиночные
-  // поля fromCollectionId/bggId.
+  // Нормализуем вход в список { from, gameId }: либо массив items, либо одиночные
+  // поля fromCollectionId/gameId.
   const rawItems =
     data.items ??
-    [{ fromCollectionId: data.fromCollectionId, bggId: data.bggId }];
+    [{ fromCollectionId: data.fromCollectionId, gameId: data.gameId }];
 
   const moves = rawItems
-    .map((it) => ({ from: it.fromCollectionId ?? "", bggId: it.bggId ?? 0 }))
-    .filter((m) => m.from && m.bggId);
+    .map((it) => ({ from: it.fromCollectionId ?? "", gameId: it.gameId ?? 0 }))
+    .filter((m) => m.from && m.gameId);
 
   if (moves.length === 0) {
     return NextResponse.json({ error: "Нечего перемещать" }, { status: 400 });
@@ -190,10 +190,10 @@ export async function PUT(request: Request) {
   const failed: number[] = [];
   for (const m of moves) {
     try {
-      await moveGameToCollection(supabase, m.from, toCollectionId, m.bggId, user.id);
-      moved.push(m.bggId);
+      await moveGameToCollection(supabase, m.from, toCollectionId, m.gameId, user.id);
+      moved.push(m.gameId);
     } catch {
-      failed.push(m.bggId);
+      failed.push(m.gameId);
     }
   }
 
@@ -222,13 +222,13 @@ export async function PATCH(request: Request) {
 
   try {
     if (tags !== undefined || notes !== undefined) {
-      await updateCollectionItem(supabase, data.collectionId, data.bggId, {
+      await updateCollectionItem(supabase, data.collectionId, data.gameId, {
         tags,
         notes: notes === undefined ? undefined : notes || null,
       });
     }
     if (info) {
-      await updateGameInfo(supabase, data.bggId, info);
+      await updateGameInfo(supabase, data.gameId, info);
     }
     return NextResponse.json({ ok: true });
   } catch (e) {

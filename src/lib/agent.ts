@@ -60,13 +60,13 @@ const tools: Anthropic.Tool[] = [
   {
     name: "remove_from_collection",
     description:
-      "Удаляет игру из коллекции пользователя по BGG id. Сначала найди игру в коллекции через list_collection, чтобы взять правильный id.",
+      "Удаляет игру из коллекции пользователя по нашему game_id. Сначала найди игру в коллекции через list_collection, чтобы взять правильный game_id.",
     input_schema: {
       type: "object" as const,
       properties: {
-        bgg_id: { type: "integer", description: "BGG id игры" },
+        game_id: { type: "integer", description: "Наш id игры (games.id) из list_collection" },
       },
-      required: ["bgg_id"],
+      required: ["game_id"],
     },
   },
   {
@@ -76,20 +76,20 @@ const tools: Anthropic.Tool[] = [
     input_schema: {
       type: "object" as const,
       properties: {
-        bgg_id: { type: "integer", description: "BGG id игры" },
+        game_id: { type: "integer", description: "Наш id игры (games.id) из list_collection" },
         tags: {
           type: "array",
           items: { type: "string" },
           description: "Новый полный список тегов",
         },
       },
-      required: ["bgg_id", "tags"],
+      required: ["game_id", "tags"],
     },
   },
   {
     name: "list_collection",
     description:
-      "Возвращает текущую коллекцию пользователя: BGG id, название и теги каждой игры. Вызывай, когда команда ссылается на игру, уже находящуюся в коллекции (удалить, поменять теги).",
+      "Возвращает текущую коллекцию пользователя: game_id, название и теги каждой игры. Вызывай, когда команда ссылается на игру, уже находящуюся в коллекции (удалить, поменять теги).",
     input_schema: {
       type: "object" as const,
       properties: {},
@@ -154,13 +154,13 @@ export async function runCollectionAgent(
         }`;
       }
       case "remove_from_collection": {
-        await removeGameFromCollection(supabase, collectionId, Number(input.bgg_id));
+        await removeGameFromCollection(supabase, collectionId, Number(input.game_id));
         changed = true;
         return "Игра удалена из коллекции";
       }
       case "set_tags": {
         const tags = (input.tags as string[]).map((t) => t.toLowerCase());
-        await updateGameTags(supabase, collectionId, Number(input.bgg_id), tags);
+        await updateGameTags(supabase, collectionId, Number(input.game_id), tags);
         changed = true;
         return `Теги обновлены: ${tags.join(", ")}`;
       }
@@ -171,7 +171,7 @@ export async function runCollectionAgent(
           limit: 200,
         });
         return JSON.stringify(
-          items.map((i) => ({ bgg_id: i.bggId, name: i.name, tags: i.tags }))
+          items.map((i) => ({ game_id: i.gameId, name: i.name, tags: i.tags }))
         );
       }
       default:

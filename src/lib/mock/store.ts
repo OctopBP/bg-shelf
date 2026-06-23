@@ -6,6 +6,8 @@ import { MOCK_GAMES } from "../bgg.mock";
 import { DEMO_USER, FRIEND_USER } from "./config";
 
 export interface GameRecord {
+  /** Наш id игры. В демо совпадает с bgg_id (оба — уникальные числа). */
+  id: number;
   bgg_id: number;
   name: string;
   original_name: string | null;
@@ -45,7 +47,7 @@ interface MemberRecord {
 export interface ItemRecord {
   id: string;
   collection_id: string;
-  bgg_id: number;
+  game_id: number;
   tags: string[];
   notes: string | null;
   added_at: string;
@@ -56,7 +58,7 @@ export interface ItemRecord {
 export interface ItemRow {
   id: string;
   collection_id: string;
-  bgg_id: number;
+  game_id: number;
   tags: string[];
   notes: string | null;
   added_at: string;
@@ -91,6 +93,7 @@ const FRIEND_COLLECTION_ID = "col-friend";
 
 function toGameRecord(g: (typeof MOCK_GAMES)[number]): GameRecord {
   return {
+    id: g.bggId,
     bgg_id: g.bggId,
     // Запросы русские → показываем русское название, как и для игр,
     // добавленных через BGG (см. pickLocalizedName в lib/bgg.ts).
@@ -150,7 +153,7 @@ function seed() {
     items.push({
       id: crypto.randomUUID(),
       collection_id: SHELF_ID,
-      bgg_id: bggId,
+      game_id: bggId,
       tags,
       notes: null,
       added_at: new Date(now - i * 60_000).toISOString(),
@@ -161,7 +164,7 @@ function seed() {
   items.push({
     id: crypto.randomUUID(),
     collection_id: SHELF_ID,
-    bgg_id: 199792,
+    game_id: 199792,
     tags: ["хочу попробовать"],
     notes: null,
     added_at: new Date(now - 30_000).toISOString(),
@@ -192,7 +195,7 @@ function seed() {
     items.push({
       id: crypto.randomUUID(),
       collection_id: FRIEND_COLLECTION_ID,
-      bgg_id: bggId,
+      game_id: bggId,
       tags: [],
       notes: null,
       added_at: new Date(now - i * 60_000).toISOString(),
@@ -250,13 +253,13 @@ export function gamesByIds(ids: number[]): GameRecord[] {
 // --- Collection items ------------------------------------------------------
 export function upsertItem(
   collectionId: string,
-  bggId: number,
+  gameId: number,
   tags: string[],
   addedBy?: string | null
 ): void {
   seed();
   const existing = items.find(
-    (i) => i.collection_id === collectionId && i.bgg_id === bggId
+    (i) => i.collection_id === collectionId && i.game_id === gameId
   );
   if (existing) {
     existing.tags = tags;
@@ -265,7 +268,7 @@ export function upsertItem(
   items.push({
     id: crypto.randomUUID(),
     collection_id: collectionId,
-    bgg_id: bggId,
+    game_id: gameId,
     tags,
     notes: null,
     added_at: new Date().toISOString(),
@@ -273,22 +276,22 @@ export function upsertItem(
   });
 }
 
-export function deleteItem(collectionId: string, bggId: number): void {
+export function deleteItem(collectionId: string, gameId: number): void {
   seed();
   const idx = items.findIndex(
-    (i) => i.collection_id === collectionId && i.bgg_id === bggId
+    (i) => i.collection_id === collectionId && i.game_id === gameId
   );
   if (idx !== -1) items.splice(idx, 1);
 }
 
 export function updateItemFields(
   collectionId: string,
-  bggId: number,
+  gameId: number,
   fields: { tags?: string[]; notes?: string | null }
 ): void {
   seed();
   const item = items.find(
-    (i) => i.collection_id === collectionId && i.bgg_id === bggId
+    (i) => i.collection_id === collectionId && i.game_id === gameId
   );
   if (!item) return;
   if (fields.tags !== undefined) item.tags = fields.tags;
@@ -299,11 +302,11 @@ function toRow(i: ItemRecord, withCollection: boolean): ItemRow {
   return {
     id: i.id,
     collection_id: i.collection_id,
-    bgg_id: i.bgg_id,
+    game_id: i.game_id,
     tags: i.tags,
     notes: i.notes,
     added_at: i.added_at,
-    games: games.get(i.bgg_id) ?? null,
+    games: games.get(i.game_id) ?? null,
     ...(withCollection
       ? {
           collections: {

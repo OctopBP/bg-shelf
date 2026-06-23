@@ -158,7 +158,10 @@ export async function buildProposal(
         MAX_CANDIDATES
       );
       for (const m of local) {
-        if (seen.has(m.bggId)) continue;
+        // Путь добавления пока идёт через BGG (детали тянутся по bggId), поэтому
+        // не-BGG игры (bggId = null) тут пропускаем. Полноценное добавление
+        // не-BGG игр по нашему game_id — отдельная будущая фича.
+        if (m.bggId == null || seen.has(m.bggId)) continue;
         seen.add(m.bggId);
         candidates.push({
           bggId: m.bggId,

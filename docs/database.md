@@ -148,3 +148,57 @@ agent читает ≤ 200. Ни один запрос не приближает
   роуте — это верхний предел стоимости/времени одной команды. Путь добавления игр
   идёт мимо агента (`parseAddCommand` → предложение), так что агент обычно делает
   1–3 шага.
+
+## 6. Идентичность игр: всё на наш `games.id` (Фазы A–C)
+
+Миграции `20260623120000` (A), `20260623130000` (B), `20260623140000` (C).
+Подробное ревью и план — `docs/db-review.md`.
+
+### Главное правило
+
+**Любая связь с игрой ссылается на наш `games.id` (bigint), а не на `bgg_id`.**
+Внешние идентификаторы (BGG и будущие источники) живут в `game_external_ids`.
+Новых FK на `bgg_id` не заводим.
+
+- `collection_items.game_id → games.id` (было `bgg_id`). Уникальность записи —
+  `(collection_id, game_id)`. Это открыло игры из не-BGG источников (у них
+  `bgg_id IS NULL`) — раньше их нельзя было положить в коллекцию.
+- `games.bgg_id` **остаётся** как denormalized-зеркало: нужен для ссылки
+  «открыть на BGG» и для дедупа в `cache_game` (`on conflict (bgg_id)`). Это не
+  ключ связей. Канон внешних id — `game_external_ids` (заполняется и `cache_game`,
+  и seed).
+- `cache_game(...)` возвращает строку `games` (с `id`); вызывающий код привязывает
+  `collection_items.game_id` по нему, не зная внутренний id заранее.
+
+### Контракт приложения
+
+- `CollectionGame.gameId` (= `games.id`) — идентичность записи: URL `/game/[id]`,
+  удаление/перемещение/теги. `CollectionGame.bggId` (`number | null`) — только для
+  ссылки на BGG.
+- API `/api/collection`: `DELETE`/`PUT`/`PATCH` оперируют `gameId`; `POST`
+  (добавление новой игры из BGG) принимает `bggId` — это путь открытия игры из
+  BGG. Добавление не-BGG игр по `gameId` — отдельная будущая фича.
+- Агент: `list_collection` отдаёт `game_id`; `remove`/`set_tags` — по `game_id`;
+  `add_to_collection` — по `bgg_id` (поиск идёт через BGG).
+
+### Разгрузка god-table `games`
+
+- BGG-метрики (`rank`, `bayes_average`, `average`, `users_rated`,
+  `subcategory_ranks`, `best/recommended_players`) вынесены в `game_bgg_stats`
+  (1:1 с игрой, обновляются отдельно; у не-BGG игр строки просто нет).
+  `rating`/`weight` оставлены на `games` как отображаемые поля (их читает UI).
+- `contributors`: убран дублирующий `kind` (тип вклада только в
+  `game_contributors.role`), уникальность по имени, внешние id в
+  `contributor_external_ids`.
+- `preorders.game_id` (nullable) — связь предзаказа с карточкой игры (матчинг —
+  будущая фича). `games.created_at`/`slug` добавлены (роутинг пока по `id`).
+
+### Осознанно отложено (см. `docs/db-review.md`)
+
+- **B1** — дубль имени `games.name` vs `game_names`. Сейчас: `games.name` —
+  отображаемое имя (источник правды для UI), `game_names` — поисковый индекс
+  (заполнит будущий импортёр). Нормализация позже, чтобы не ломать `games(*)`-join.
+- **B2** — нормализация таксономии `categories`/`mechanics`/`families` (`text[]`)
+  в `tags`/`game_tags`. Отложено: ломает `games(*)`-join, низкая сейчас отдача.
+- **M-4** — `contributors(publisher)` vs таблица `publishers` (предзаказы) —
+  потенциальный дубль «издателя»; решение при матчинге предзаказов↔игр.

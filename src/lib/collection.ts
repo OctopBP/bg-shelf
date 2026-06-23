@@ -17,7 +17,7 @@ type GameRow = Database["public"]["Tables"]["games"]["Row"];
 /** Форма строки joined-select (collection_items + games [+ collections]). */
 type CollectionItemRow = Pick<
   Database["public"]["Tables"]["collection_items"]["Row"],
-  "id" | "collection_id" | "bgg_id" | "tags" | "notes" | "added_at"
+  "id" | "collection_id" | "game_id" | "tags" | "notes" | "added_at"
 > & {
   games: GameRow | null;
   collections?: { name: string } | null;
@@ -29,7 +29,10 @@ export interface CollectionGame {
   collectionId: string;
   /** Имя коллекции — заполняется только в сводном виде «Все игры». */
   collectionName?: string;
-  bggId: number;
+  /** Наш собственный id игры (games.id) — ключ всех связей и URL. */
+  gameId: number;
+  /** BGG id, если игра из BGG (для ссылки «открыть на BGG»); иначе null. */
+  bggId: number | null;
   name: string;
   /** Оригинальное название (обычно английское); null, если совпадает с name */
   originalName: string | null;
@@ -68,7 +71,8 @@ function mapRow(row: CollectionItemRow): CollectionGame {
     id: row.id,
     collectionId: row.collection_id,
     ...(collection ? { collectionName: collection.name } : {}),
-    bggId: row.bgg_id,
+    gameId: game.id,
+    bggId: game.bgg_id,
     name: game.name,
     originalName: game.original_name ?? null,
     yearPublished: game.year_published,
@@ -108,7 +112,9 @@ export async function addGameToCollection(
   // пополняет каталог через SECURITY DEFINER функцию cache_game: она лишь
   // ВСТАВЛЯЕТ отсутствующую игру и никогда не перезаписывает существующую
   // запись (защита от вандализма). См. миграцию 20260622150000.
-  const { error: gameError } = await supabase.rpc("cache_game", {
+  // cache_game возвращает строку games (с нашим id) — по нему привязываем запись
+  // коллекции (collection_items.game_id), не зная деталей внутреннего id заранее.
+  const { data: cached, error: gameError } = await supabase.rpc("cache_game", {
     p_bgg_id: details.bggId,
     p_name: details.name,
     p_original_name: details.originalName ?? undefined,
@@ -128,10 +134,14 @@ export async function addGameToCollection(
     log.error("cache_game упал:", gameError);
     throw new Error(`Не удалось сохранить игру: ${gameError.message}`);
   }
+  const gameId = cached?.id;
+  if (!gameId) {
+    throw new Error("cache_game не вернул id игры");
+  }
 
   const { error: itemError } = await supabase.from("collection_items").upsert(
-    { collection_id: collectionId, bgg_id: bggId, tags, added_by: userId ?? null },
-    { onConflict: "collection_id,bgg_id" }
+    { collection_id: collectionId, game_id: gameId, tags, added_by: userId ?? null },
+    { onConflict: "collection_id,game_id" }
   );
   if (itemError) {
     log.error("upsert collection_items упал:", itemError);
@@ -145,23 +155,23 @@ export async function addGameToCollection(
 export async function removeGameFromCollection(
   supabase: DB,
   collectionId: string,
-  bggId: number
+  gameId: number
 ): Promise<void> {
   const { error } = await supabase
     .from("collection_items")
     .delete()
-    .eq("bgg_id", bggId)
+    .eq("game_id", gameId)
     .eq("collection_id", collectionId);
   if (error) throw new Error(`Не удалось удалить: ${error.message}`);
 }
 
 /** Переносит запись игры из одной коллекции в другую. Теги и заметку
- *  сохраняем. BGG не трогаем — игра уже есть в кэше games. */
+ *  сохраняем. Каталог games не трогаем — игра уже там. */
 export async function moveGameToCollection(
   supabase: DB,
   fromCollectionId: string,
   toCollectionId: string,
-  bggId: number,
+  gameId: number,
   userId: string
 ): Promise<void> {
   if (fromCollectionId === toCollectionId) return;
@@ -169,7 +179,7 @@ export async function moveGameToCollection(
   const { data: existing, error: selErr } = await supabase
     .from("collection_items")
     .select("tags, notes")
-    .eq("bgg_id", bggId)
+    .eq("game_id", gameId)
     .eq("collection_id", fromCollectionId)
     .maybeSingle();
   if (selErr) throw new Error(selErr.message);
@@ -178,24 +188,24 @@ export async function moveGameToCollection(
   const notes = existing.notes ?? null;
 
   const { error: insErr } = await supabase.from("collection_items").upsert(
-    { collection_id: toCollectionId, bgg_id: bggId, tags, notes, added_by: userId },
-    { onConflict: "collection_id,bgg_id" }
+    { collection_id: toCollectionId, game_id: gameId, tags, notes, added_by: userId },
+    { onConflict: "collection_id,game_id" }
   );
   if (insErr) throw new Error(`Не удалось переместить: ${insErr.message}`);
 
-  await removeGameFromCollection(supabase, fromCollectionId, bggId);
+  await removeGameFromCollection(supabase, fromCollectionId, gameId);
 }
 
 export async function updateGameTags(
   supabase: DB,
   collectionId: string,
-  bggId: number,
+  gameId: number,
   tags: string[]
 ): Promise<void> {
   const { error } = await supabase
     .from("collection_items")
     .update({ tags })
-    .eq("bgg_id", bggId)
+    .eq("game_id", gameId)
     .eq("collection_id", collectionId);
   if (error) throw new Error(`Не удалось обновить теги: ${error.message}`);
 }
@@ -204,7 +214,7 @@ export async function updateGameTags(
 export async function updateCollectionItem(
   supabase: DB,
   collectionId: string,
-  bggId: number,
+  gameId: number,
   fields: { tags?: string[]; notes?: string | null }
 ): Promise<void> {
   const patch: Database["public"]["Tables"]["collection_items"]["Update"] = {};
@@ -215,7 +225,7 @@ export async function updateCollectionItem(
   const { error } = await supabase
     .from("collection_items")
     .update(patch)
-    .eq("bgg_id", bggId)
+    .eq("game_id", gameId)
     .eq("collection_id", collectionId);
   if (error) throw new Error(`Не удалось сохранить: ${error.message}`);
 }
@@ -223,7 +233,7 @@ export async function updateCollectionItem(
 /** Правит общий кэш игры (games) — название, год, число игроков, время, описание. */
 export async function updateGameInfo(
   supabase: DB,
-  bggId: number,
+  gameId: number,
   info: GameInfoUpdate
 ): Promise<void> {
   const patch: Database["public"]["Tables"]["games"]["Update"] = {
@@ -239,20 +249,20 @@ export async function updateGameInfo(
   const { error } = await supabase
     .from("games")
     .update(patch)
-    .eq("bgg_id", bggId);
+    .eq("id", gameId);
   if (error) throw new Error(`Не удалось обновить игру: ${error.message}`);
 }
 
-/** Одна игра из коллекции по bggId (для страницы игры). */
+/** Одна игра из коллекции по gameId (для страницы игры). */
 export async function getCollectionGame(
   supabase: DB,
   collectionId: string,
-  bggId: number
+  gameId: number
 ): Promise<CollectionGame | null> {
   const { data, error } = await supabase
     .from("collection_items")
-    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
-    .eq("bgg_id", bggId)
+    .select("id, collection_id, game_id, tags, notes, added_at, games(*)")
+    .eq("game_id", gameId)
     .eq("collection_id", collectionId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -296,7 +306,7 @@ export async function listCollection(
   const limit = clampLimit(opts.limit);
   let query = supabase
     .from("collection_items")
-    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*)")
+    .select("id, collection_id, game_id, tags, notes, added_at, games(*)")
     .eq("collection_id", collectionId);
   const clause = cursorClause(opts.cursor);
   if (clause) query = query.or(clause);
@@ -312,7 +322,10 @@ export async function listCollection(
 
 /** Совпадение из нашей БД по основному или альтернативному названию. */
 export interface LocalGameMatch {
-  bggId: number;
+  /** Наш собственный id игры (games.id) — ключ связей. */
+  gameId: number;
+  /** BGG id, если игра из BGG; иначе null (не-BGG источник). */
+  bggId: number | null;
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;
@@ -324,10 +337,10 @@ export interface LocalGameMatch {
  * `search_games` — триграммный fuzzy-поиск по таблице game_names). Принимает
  * несколько вариантов запроса (например, как сказал пользователь и переведённое
  * на оригинал название) и объединяет результаты, сохраняя порядок и убирая дубли
- * по bgg_id. Игры без bgg_id пропускаем — их пока нельзя положить в коллекцию
- * (collection_items ссылается на games.bgg_id). Best-effort: при ошибке RPC
- * (например, демо-режим) возвращает пустой список, и вызывающий код откатывается
- * на поиск BGG. */
+ * по нашему game_id. Возвращает и не-BGG игры (bggId = null) — теперь
+ * collection_items ссылается на games.id, поэтому они полноправны. Best-effort:
+ * при ошибке RPC (например, демо-режим) возвращает пустой список, и вызывающий
+ * код откатывается на поиск BGG. */
 export async function searchLocalGames(
   supabase: DB,
   queries: string[],
@@ -346,11 +359,12 @@ export async function searchLocalGames(
       continue;
     }
     for (const row of data ?? []) {
-      const bggId = row.bgg_id;
-      if (bggId == null || seen.has(bggId)) continue;
-      seen.add(bggId);
+      const gameId = row.id;
+      if (gameId == null || seen.has(gameId)) continue;
+      seen.add(gameId);
       out.push({
-        bggId,
+        gameId,
+        bggId: row.bgg_id ?? null,
         name: row.name,
         yearPublished: row.year_published ?? null,
         thumbnailUrl: row.thumbnail_url ?? null,
@@ -412,7 +426,7 @@ export async function listAllGames(
   const limit = clampLimit(opts.limit);
   let query = supabase
     .from("collection_items")
-    .select("id, collection_id, bgg_id, tags, notes, added_at, games(*), collections(name)")
+    .select("id, collection_id, game_id, tags, notes, added_at, games(*), collections(name)")
     .in("collection_id", ids);
   const clause = cursorClause(opts.cursor);
   if (clause) query = query.or(clause);

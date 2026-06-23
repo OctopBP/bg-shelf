@@ -144,15 +144,15 @@ const restHandlers = [
           .map((s) => s.replace(/^"|"$/g, ""))
       : null;
     const collectionId = inList ? undefined : eqValue(url, "collection_id");
-    const bggId = eqValue(url, "bgg_id");
+    const gameId = eqValue(url, "game_id");
 
     // select без embed games — запрос для подсчёта.
     if (!select.includes("games")) {
-      // Точечный запрос конкретной записи по bgg_id (например, перед
+      // Точечный запрос конкретной записи по game_id (например, перед
       // перемещением) — отдаём настоящую строку с tags/notes, а не счётчик.
-      if (bggId !== undefined && collectionId !== undefined) {
+      if (gameId !== undefined && collectionId !== undefined) {
         const rows = selectItems(collectionId).filter(
-          (r) => r.bgg_id === Number(bggId)
+          (r) => r.game_id === Number(gameId)
         );
         if (wantsObject(request)) {
           return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
@@ -175,8 +175,8 @@ const restHandlers = [
     if (inList) {
       rows = rows.filter((r) => inList.includes(String(r.collection_id)));
     }
-    if (bggId !== undefined) {
-      rows = rows.filter((r) => r.bgg_id === Number(bggId));
+    if (gameId !== undefined) {
+      rows = rows.filter((r) => r.game_id === Number(gameId));
     }
 
     if (wantsObject(request)) {
@@ -220,7 +220,7 @@ const restHandlers = [
     for (const row of rows) {
       upsertItem(
         String(row.collection_id),
-        Number(row.bgg_id),
+        Number(row.game_id),
         (row.tags as string[]) ?? [],
         (row.added_by as string | null) ?? null
       );
@@ -230,8 +230,8 @@ const restHandlers = [
 
   http.delete("*/rest/v1/collection_items", ({ request }) => {
     const url = new URL(request.url);
-    const bggId = Number(eqValue(url, "bgg_id"));
-    deleteItem(String(eqValue(url, "collection_id")), bggId);
+    const gameId = Number(eqValue(url, "game_id"));
+    deleteItem(String(eqValue(url, "collection_id")), gameId);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -245,8 +245,8 @@ const restHandlers = [
       ...(body.tags !== undefined ? { tags: body.tags } : {}),
       ...(body.notes !== undefined ? { notes: body.notes } : {}),
     };
-    const bggId = Number(eqValue(url, "bgg_id"));
-    updateItemFields(String(eqValue(url, "collection_id")), bggId, patch);
+    const gameId = Number(eqValue(url, "game_id"));
+    updateItemFields(String(eqValue(url, "collection_id")), gameId, patch);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -513,6 +513,7 @@ const restHandlers = [
   http.post("*/rest/v1/rpc/cache_game", async ({ request }) => {
     const p = (await request.json()) as Record<string, unknown>;
     const record: GameRecord = {
+      id: Number(p.p_bgg_id),
       bgg_id: Number(p.p_bgg_id),
       name: String(p.p_name),
       original_name: (p.p_original_name as string | undefined) ?? null,
@@ -538,7 +539,7 @@ const restHandlers = [
   http.patch("*/rest/v1/games", async ({ request }) => {
     const url = new URL(request.url);
     const body = (await request.json()) as Partial<GameRecord>;
-    updateGame(Number(eqValue(url, "bgg_id")), body);
+    updateGame(Number(eqValue(url, "id")), body);
     return new HttpResponse(null, { status: 204 });
   }),
 ];

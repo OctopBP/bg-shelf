@@ -86,7 +86,7 @@ export default function GameDetail({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           collectionId: game.collectionId,
-          bggId: game.bggId,
+          gameId: game.gameId,
           tags,
           notes,
           info: {
@@ -119,7 +119,7 @@ export default function GameDetail({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           collectionId: game.collectionId,
-          bggId: game.bggId,
+          gameId: game.gameId,
         }),
       });
       router.push("/");
@@ -146,15 +146,17 @@ export default function GameDetail({
         </Link>
         {!editing ? (
           <div className="flex items-center gap-2">
-            <a
-              href={`https://boardgamegeek.com/boardgame/${game.bggId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-onblack px-4 py-2 text-sm"
-            >
-              <IconExternalLink size={18} stroke={2.5} />
-              <span className="hidden sm:inline">BGG</span>
-            </a>
+            {game.bggId != null && (
+              <a
+                href={`https://boardgamegeek.com/boardgame/${game.bggId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-onblack px-4 py-2 text-sm"
+              >
+                <IconExternalLink size={18} stroke={2.5} />
+                <span className="hidden sm:inline">BGG</span>
+              </a>
+            )}
             {canEdit && (
               <button
                 onClick={startEditing}

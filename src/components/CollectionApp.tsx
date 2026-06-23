@@ -191,7 +191,7 @@ export default function CollectionApp() {
 
   // Перемещает список игр в существующую коллекцию.
   async function moveItemsTo(
-    items: { fromCollectionId: string; bggId: number }[],
+    items: { fromCollectionId: string; gameId: number }[],
     targetId: string,
   ) {
     const toMove = items.filter((i) => i.fromCollectionId !== targetId);
@@ -207,7 +207,7 @@ export default function CollectionApp() {
 
   // Создаёт новую коллекцию и перемещает в неё указанные игры.
   async function createAndMoveItemsTo(
-    items: { fromCollectionId: string; bggId: number }[],
+    items: { fromCollectionId: string; gameId: number }[],
     name: string,
   ) {
     const res = await fetch("/api/collections", {
@@ -224,7 +224,7 @@ export default function CollectionApp() {
   }
 
   function gameToItem(g: CollectionGame) {
-    return { fromCollectionId: g.collectionId, bggId: g.bggId };
+    return { fromCollectionId: g.collectionId, gameId: g.gameId };
   }
 
   async function updateVisibility(visibility: CollectionVisibility) {
@@ -262,7 +262,7 @@ export default function CollectionApp() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         collectionId: game.collectionId,
-        bggId: game.bggId,
+        gameId: game.gameId,
       }),
     });
     loadGames();
@@ -639,7 +639,7 @@ export default function CollectionApp() {
                     )}
                   </div>
                 )}
-                <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
+                <Link href={`/game/${game.gameId}?c=${game.collectionId}`}>
                   <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
                     {game.imageUrl || game.thumbnailUrl ? (
                       <ProgressiveImage
@@ -656,7 +656,7 @@ export default function CollectionApp() {
                   </div>
                 </Link>
                 <div className="p-3">
-                  <Link href={`/game/${game.bggId}?c=${game.collectionId}`}>
+                  <Link href={`/game/${game.gameId}?c=${game.collectionId}`}>
                     <h3
                       className="truncate font-bold text-ink hover:text-brand"
                       title={game.name}

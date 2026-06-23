@@ -12,7 +12,8 @@ import type { CollectionSummary } from "@/lib/collections";
 interface CollectionGame {
   id: string;
   collectionId: string;
-  bggId: number;
+  gameId: number;
+  bggId: number | null;
   name: string;
   yearPublished: number | null;
   thumbnailUrl: string | null;

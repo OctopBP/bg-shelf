@@ -61,14 +61,20 @@ values
   (9209,  'Билет на поезд',   2004, 2, 5, 60)
 on conflict (bgg_id) do nothing;
 
+-- Зеркалим bgg_id в каноническую game_external_ids (как это делает cache_game).
+insert into public.game_external_ids (game_id, source, external_id)
+  select id, 'bgg', bgg_id::text from public.games where bgg_id is not null
+on conflict do nothing;
+
 -- --- 3. Игры в дефолтной коллекции демо-пользователя ------------------------
 -- Коллекцию по умолчанию создал триггер; находим её по owner_id + is_default.
-insert into public.collection_items (collection_id, bgg_id, tags, added_by)
+-- collection_items привязаны к games.id (а не bgg_id) — резолвим id по bgg_id.
+insert into public.collection_items (collection_id, game_id, tags, added_by)
 select
   (select id from public.collections
      where owner_id = '11111111-1111-1111-1111-111111111111' and is_default
      limit 1),
-  g.bgg_id,
+  gm.id,
   g.tags,
   '11111111-1111-1111-1111-111111111111'
 from (values
@@ -76,8 +82,9 @@ from (values
   (13,    array['классика']::text[]),
   (1927,  array['пати']::text[])
 ) as g(bgg_id, tags)
+join public.games gm on gm.bgg_id = g.bgg_id
 where exists (
   select 1 from public.collections
   where owner_id = '11111111-1111-1111-1111-111111111111' and is_default
 )
-on conflict (collection_id, bgg_id) do nothing;
+on conflict (collection_id, game_id) do nothing;
