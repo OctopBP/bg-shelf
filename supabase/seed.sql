@@ -14,10 +14,16 @@
 -- Вставка в auth.users включает триггер handle_new_user, который сам создаёт
 -- profile + дефолтную коллекцию «Моя коллекция» + membership(owner). Поэтому
 -- коллекцию здесь руками НЕ создаём.
+-- Токеновые колонки (confirmation_token и т.п.) ДОЛЖНЫ быть '' , не NULL:
+-- GoTrue читает их в Go-строку и падает на NULL («converting NULL to string
+-- is unsupported»). Поэтому задаём пустые строки явно.
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
   email_confirmed_at, created_at, updated_at,
-  raw_app_meta_data, raw_user_meta_data
+  raw_app_meta_data, raw_user_meta_data,
+  confirmation_token, recovery_token, email_change,
+  email_change_token_new, email_change_token_current,
+  phone_change, phone_change_token, reauthentication_token
 )
 values (
   '00000000-0000-0000-0000-000000000000',
@@ -26,7 +32,8 @@ values (
   'demo@boardgames.local',
   crypt('demo1234', gen_salt('bf')),
   now(), now(), now(),
-  '{"provider":"email","providers":["email"]}', '{}'
+  '{"provider":"email","providers":["email"]}', '{}',
+  '', '', '', '', '', '', '', ''
 )
 on conflict (id) do nothing;
 
