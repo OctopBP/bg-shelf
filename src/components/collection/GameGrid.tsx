@@ -3,6 +3,7 @@
 import { useState, type RefObject } from "react";
 import { IconDice5Filled, IconSearch } from "@tabler/icons-react";
 import { colorAt } from "@/lib/palette";
+import { EmptyState } from "@/components/ui";
 import type { CollectionGame } from "@/hooks/useCollectionData";
 import GameCard from "./GameCard";
 import type { GridNode } from "./types";
@@ -92,22 +93,22 @@ export default function GameGrid({
 
   if (visibleCount === 0) {
     return (
-      <div className="surface mx-auto mt-4 max-w-md px-6 py-12 text-center">
-        <div className="mb-3 flex justify-center text-ink/30">
-          {gamesCount === 0 ? (
+      <EmptyState
+        icon={
+          gamesCount === 0 ? (
             <IconDice5Filled size={56} />
           ) : (
             <IconSearch size={56} />
-          )}
-        </div>
-        <p className="font-medium text-ink/70">
-          {gamesCount === 0
+          )
+        }
+        message={
+          gamesCount === 0
             ? canEdit
               ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
               : "В этой коллекции пока нет игр."
-            : "Нет игр по выбранному фильтру."}
-        </p>
-      </div>
+            : "Нет игр по выбранному фильтру."
+        }
+      />
     );
   }
 

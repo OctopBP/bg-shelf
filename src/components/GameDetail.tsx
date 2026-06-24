@@ -11,13 +11,12 @@ import {
   IconExternalLink,
   IconLoader2,
   IconPencil,
-  IconPlus,
-  IconPuzzle,
   IconStarFilled,
   IconTrash,
 } from "@tabler/icons-react";
 import type { CollectionGame, ExpansionSummary } from "@/lib/collection";
-import { Tag } from "@/components/ui";
+import { Tag, TagInput } from "@/components/ui";
+import { StatBadge, GameMetaList, ExpansionList } from "@/components/game";
 import ConfirmDialog from "./ConfirmDialog";
 
 interface EditableInfo {
@@ -315,25 +314,25 @@ export default function GameDetail({
             </div>
           ) : (
             <div className="flex flex-wrap gap-2 text-sm font-bold text-ink">
-              {players && <Stat label="игроков">{players}</Stat>}
+              {players && <StatBadge label="игроков">{players}</StatBadge>}
               {game.playingTime && (
-                <Stat label="минут">{game.playingTime}</Stat>
+                <StatBadge label="минут">{game.playingTime}</StatBadge>
               )}
               {game.rating != null && (
-                <Stat label="рейтинг BGG">
+                <StatBadge label="рейтинг BGG">
                   <span className="inline-flex items-center gap-0.5 text-orange">
                     <IconStarFilled size={13} />
                     {Number(game.rating).toFixed(1)}
                   </span>
-                </Stat>
+                </StatBadge>
               )}
               {game.weight != null && game.weight > 0 && (
-                <Stat label="сложность">
+                <StatBadge label="сложность">
                   <span className="inline-flex items-center gap-1">
                     <IconWeight size={13} />
                     {Number(game.weight).toFixed(1)}/5
                   </span>
-                </Stat>
+                </StatBadge>
               )}
             </div>
           )}
@@ -356,28 +355,12 @@ export default function GameDetail({
                 <span className="text-sm text-ink/45">нет тегов</span>
               )}
               {editing && (
-                <span className="inline-flex items-center gap-1">
-                  <input
-                    value={tagDraft}
-                    onChange={(e) => setTagDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addTag();
-                      }
-                    }}
-                    placeholder="новый тег"
-                    className="field w-28 px-2.5 py-1 text-sm"
-                  />
-                  <button
-                    onClick={addTag}
-                    disabled={!tagDraft.trim()}
-                    aria-label="Добавить тег"
-                    className="icon-btn h-7 w-7 disabled:opacity-40"
-                  >
-                    <IconPlus size={15} stroke={3} />
-                  </button>
-                </span>
+                <TagInput
+                  value={tagDraft}
+                  onChange={setTagDraft}
+                  onSubmit={addTag}
+                  size="md"
+                />
               )}
             </div>
           </div>
@@ -431,10 +414,10 @@ export default function GameDetail({
           {!editing && (game.categories.length > 0 || game.mechanics.length > 0) && (
             <div className="grid gap-4 border-t-[3px] border-dashed border-ink/15 pt-4 sm:grid-cols-2">
               {game.categories.length > 0 && (
-                <Meta title="Категории" items={game.categories} />
+                <GameMetaList title="Категории" items={game.categories} />
               )}
               {game.mechanics.length > 0 && (
-                <Meta title="Механики" items={game.mechanics} />
+                <GameMetaList title="Механики" items={game.mechanics} />
               )}
             </div>
           )}
@@ -456,40 +439,7 @@ export default function GameDetail({
       </div>
 
       {/* Дополнения в коллекции */}
-      {expansions.length > 0 && (
-        <div className="surface space-y-3 px-5 py-5 sm:px-7 sm:py-6">
-          <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-ink/55">
-            Дополнения в коллекции · {expansions.length}
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {expansions.map((exp) => (
-              <Link
-                key={exp.gameId}
-                href={`/game/${exp.gameId}?c=${exp.collectionId}`}
-                className="flex items-center gap-3 rounded-2xl border-2 border-ink bg-brand-soft/40 p-2 transition hover:bg-brand-soft"
-              >
-                <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border-2 border-ink bg-brand-soft">
-                  {exp.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={exp.thumbnailUrl}
-                      alt={exp.name}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center text-ink/30">
-                      <IconPuzzle size={22} />
-                    </span>
-                  )}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink">
-                  {exp.name}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+      <ExpansionList expansions={expansions} />
 
       {confirmingRemove && (
         <ConfirmDialog
@@ -500,32 +450,6 @@ export default function GameDetail({
           onClose={() => setConfirmingRemove(false)}
         />
       )}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border-2 border-ink bg-brand-soft px-3 py-1">
-      <span className="inline-flex items-center">{children}</span>
-      <span className="text-xs font-semibold text-ink/55">{label}</span>
-    </span>
-  );
-}
-
-function Meta({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div>
-      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-ink/55">
-        {title}
-      </p>
-      <p className="text-sm font-medium text-ink/75">{items.join(", ")}</p>
     </div>
   );
 }
