@@ -15,10 +15,9 @@ import {
   IconPuzzle,
   IconStarFilled,
   IconTrash,
-  IconX,
 } from "@tabler/icons-react";
 import type { CollectionGame, ExpansionSummary } from "@/lib/collection";
-import { colorForKey } from "@/lib/palette";
+import { Tag } from "@/components/ui";
 import ConfirmDialog from "./ConfirmDialog";
 
 interface EditableInfo {
@@ -346,22 +345,12 @@ export default function GameDetail({
             </p>
             <div className="flex flex-wrap items-center gap-2">
               {(editing ? tags : game.tags).map((tag) => (
-                <span
+                <Tag
                   key={tag}
-                  style={{ backgroundColor: colorForKey(tag) }}
-                  className="inline-flex items-center gap-1 rounded-full border-2 border-ink px-2.5 py-0.5 text-sm font-bold text-ink"
-                >
-                  {tag}
-                  {editing && (
-                    <button
-                      onClick={() => removeTag(tag)}
-                      aria-label={`Убрать тег ${tag}`}
-                      className="-mr-1 rounded-full p-0.5 hover:bg-ink/15"
-                    >
-                      <IconX size={13} stroke={3} />
-                    </button>
-                  )}
-                </span>
+                  label={tag}
+                  size="lg"
+                  onRemove={editing ? () => removeTag(tag) : undefined}
+                />
               ))}
               {!editing && game.tags.length === 0 && (
                 <span className="text-sm text-ink/45">нет тегов</span>

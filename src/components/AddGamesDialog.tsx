@@ -10,6 +10,7 @@ import {
   IconPuzzle,
 } from "@tabler/icons-react";
 import { colorForKey } from "@/lib/palette";
+import { Tag } from "@/components/ui";
 
 // Типы зеркалят JSON из /api/command (kind: "proposal"). Держим их здесь,
 // как и PhotoInput держит свои — чтобы не тянуть серверный lib в клиентский бандл.
@@ -367,21 +368,12 @@ export default function AddGamesDialog({
                         {/* Теги: чипы + поле ввода + подсказки */}
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           {s.tags.map((tag) => (
-                            <span
+                            <Tag
                               key={tag}
-                              style={{ backgroundColor: colorForKey(tag) }}
-                              className="inline-flex items-center gap-1 rounded-full border-2 border-ink px-2.5 py-0.5 text-xs font-bold text-ink"
-                            >
-                              {tag}
-                              <button
-                                type="button"
-                                onClick={() => removeTag(i, tag)}
-                                aria-label={`Убрать тег ${tag}`}
-                                className="-mr-1 rounded-full p-0.5 hover:bg-ink/15"
-                              >
-                                <IconX size={12} stroke={3} />
-                              </button>
-                            </span>
+                              label={tag}
+                              size="md"
+                              onRemove={() => removeTag(i, tag)}
+                            />
                           ))}
                           <span className="inline-flex items-center gap-1">
                             <input

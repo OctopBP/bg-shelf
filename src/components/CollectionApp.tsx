@@ -1,24 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   IconArrowRight,
   IconChecks,
-  IconCircleCheckFilled,
-  IconDice5Filled,
   IconFolderSymlink,
   IconLoader2,
   IconLock,
   IconMessage2,
   IconPlus,
-  IconPuzzle,
-  IconSearch,
-  IconSettings,
-  IconStarFilled,
   IconUsers,
   IconWorld,
-  IconX,
 } from "@tabler/icons-react";
 import VoiceInput from "./VoiceInput";
 import PhotoInput from "./PhotoInput";
@@ -28,16 +20,15 @@ import CreateCollectionDialog from "./CreateCollectionDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import MoveGameDialog from "./MoveGameDialog";
 import AddGamesDialog, { type ResolvedGame } from "./AddGamesDialog";
-import { colorAt, colorForKey } from "@/lib/palette";
+import { CollectionTabs, FilterBar, GameGrid } from "./collection";
+import type { GridNode, QuickFilter } from "./collection";
 import type { CollectionRole, CollectionVisibility } from "@/lib/collections";
 import {
   useCollectionData,
   ALL,
   type CollectionGame,
-  type ExpansionSummary,
-  type BaseSummary,
 } from "@/hooks/useCollectionData";
-import ProgressiveImage from "./ProgressiveImage";
+import { pluralGames } from "@/lib/plural";
 
 const VISIBILITY_OPTIONS: {
   value: CollectionVisibility;
@@ -48,45 +39,6 @@ const VISIBILITY_OPTIONS: {
   { value: "friends", label: "Только друзьям", Icon: IconUsers },
   { value: "private", label: "Только мне", Icon: IconLock },
 ];
-
-/** Русское склонение слова «игра» по числу: 1 игру, 2 игры, 5 игр. */
-function pluralGames(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return "игру";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
-    return "игры";
-  }
-  return "игр";
-}
-
-/** Склонение «доп» по числу: 1 доп, 2 допа, 5 допов. */
-function pluralExpansions(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return "доп";
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "допа";
-  return "допов";
-}
-
-/** Узел сетки: базовая/обычная игра, либо «осиротевшее» дополнение (базы нет
- *  в коллекции) — тогда главная плитка рисует ч/б обложку отсутствующей базы. */
-interface GridNode {
-  key: string;
-  /** Якорная запись коллекции (база/обычная игра или представитель сирот). */
-  game: CollectionGame;
-  /** Отсутствующая в коллекции база — рисуем её плитку ч/б. */
-  orphanBase?: BaseSummary;
-  /** Дополнения этого узла, присутствующие в коллекции. */
-  expansions: ExpansionSummary[];
-}
-
-// Быстрые фильтры по данным BGG — применяются в связке (И) с фильтром по тегам.
-interface QuickFilter {
-  key: string;
-  label: string;
-  test: (g: CollectionGame) => boolean;
-}
 
 const supports = (g: CollectionGame, n: number) =>
   g.minPlayers != null &&
@@ -139,39 +91,6 @@ export default function CollectionApp() {
   // Режим выбора нескольких игр для пакетного перемещения.
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // Какой узел сетки развёрнут (показывает список дополнений справа) и какой
-  // сейчас закрывается — закрывающийся держим в ширину 2 колонок, пока блок
-  // ужимается обратно, иначе сетка схлопнулась бы рывком до конца анимации.
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [closingKey, setClosingKey] = useState<string | null>(null);
-  // Замеренные при открытии ширины (px): всей карточки в одну колонку и её левой
-  // части. Левую часть фиксируем на этой ширине на всё время анимации — поэтому
-  // обложка и высота карточки не меняются, а сам блок плавно растёт в ширину.
-  const [cardColWidth, setCardColWidth] = useState<number | null>(null);
-  const [leftColWidth, setLeftColWidth] = useState<number | null>(null);
-  // true → ширина карточки должна быть «полной» (2 колонки); запускаем на
-  // следующем кадре после старта, чтобы сработал transition ширины.
-  const [open, setOpen] = useState(false);
-
-  // Разворот/сворачивание карточки с анимацией ширины самого блока.
-  function toggleExpanded(key: string, leftCol: Element | null | undefined) {
-    if (expandedKey === key) {
-      // Закрытие: ширина едет обратно к одной колонке, затем снимаем span.
-      setOpen(false);
-      setExpandedKey(null);
-      setClosingKey(key);
-      window.setTimeout(() => setClosingKey((c) => (c === key ? null : c)), 300);
-      return;
-    }
-    // Открытие: запоминаем ширину одной колонки, стартуем с неё и на следующем
-    // кадре разгоняем до полной ширины (2 колонки).
-    const tile = leftCol?.parentElement;
-    setCardColWidth(tile ? Math.round(tile.getBoundingClientRect().width) : null);
-    setLeftColWidth(leftCol ? Math.round(leftCol.getBoundingClientRect().width) : null);
-    setOpen(false);
-    setExpandedKey(key);
-    requestAnimationFrame(() => requestAnimationFrame(() => setOpen(true)));
-  }
   const [bulkMoving, setBulkMoving] = useState(false);
   const [proposal, setProposal] = useState<ResolvedGame[] | null>(null);
   // Растёт с каждым новым предложением — служит key, чтобы окно добавления
@@ -196,15 +115,13 @@ export default function CollectionApp() {
   };
 
   // Смена активного вида сбрасывает фильтры и режим выбора (данные грузит хук).
+  // Состояние разворота карточки живёт в GameGrid и сбрасывается через key.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setTagFilters([]);
     setQuickFilter(null);
     setSelecting(false);
     setSelectedIds(new Set());
-    setExpandedKey(null);
-    setClosingKey(null);
-    setOpen(false);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [activeId]);
 
@@ -413,13 +330,16 @@ export default function CollectionApp() {
     ? QUICK_FILTERS.find((f) => f.key === quickFilter)
     : undefined;
 
-  const allGamesCount = collections.map(c => c.gameCount).reduce((a, b) => a + b, 0);
+  const allGamesCount = collections
+    .map((c) => c.gameCount)
+    .reduce((a, b) => a + b, 0);
 
   const visibleGames = useMemo(
     () =>
       games.filter(
         (g) =>
-          (tagFilters.length === 0 || tagFilters.every(t => g.tags.includes(t))) &&
+          (tagFilters.length === 0 ||
+            tagFilters.every((t) => g.tags.includes(t))) &&
           (!activeQuick || activeQuick.test(g)),
       ),
     [games, tagFilters, activeQuick],
@@ -460,101 +380,16 @@ export default function CollectionApp() {
       style={{ "--lift": "rgba(255,255,255,0.5)" } as React.CSSProperties}
     >
       {/* Вкладки коллекций */}
-      <div className="flex flex-wrap items-center gap-2">
-        {collectionsLoaded && (
-          <button
-            onClick={() => setActiveId(ALL)}
-            style={
-              isAllView
-                ? {
-                    backgroundColor: "#fff",
-                    borderColor: "#fff",
-                    color: "#0d0d0d",
-                  }
-                : { borderColor: "#fff", color: "#fff" }
-            }
-            className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
-          >
-            Все игры
-            <span className="ml-1 transition-opacity group-hover:opacity-0">
-              · {allGamesCount}
-            </span>
-          </button>
-        )}
-        {collections.map((c) => {
-          const active = activeId === c.id;
-          const col = colorForKey(c.id);
-          const owner = c.role === "owner";
-          return (
-            <div
-              key={c.id}
-              onClick={() => setActiveId(c.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setActiveId(c.id);
-                }
-              }}
-              style={
-                active
-                  ? {
-                      backgroundColor: col,
-                      borderColor: col,
-                      color: "#0d0d0d",
-                    }
-                  : { borderColor: col, color: col }
-              }
-              className="group relative inline-flex items-center rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
-            >
-              {c.name}
-              {owner ? (
-                /* Счётчик задаёт ширину (на ховере становится прозрачным),
-                   шестерёнка прижата к правому краю пилюли — так пилюля не
-                   меняет ширину при наведении. */
-                <span className="ml-1 transition-opacity group-hover:opacity-0">
-                  · {c.gameCount}
-                </span>
-              ) : (
-                <span className="ml-1 inline-flex items-center">
-                  · {c.gameCount}
-                  <span className="ml-1 opacity-70">
-                    {c.role === "viewer" ? "👁" : "✎"}
-                  </span>
-                </span>
-              )}
-              {owner && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveId(c.id);
-                    setSettingsOpen(true);
-                  }}
-                  aria-label={`Настройки коллекции «${c.name}»`}
-                  title="Настройки коллекции"
-                  style={
-                    {
-                      "--badge": col,
-                    } as React.CSSProperties
-                  }
-                  className="absolute right-1 top-1/2 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full transition-colors hover:bg-(--badge) hover:text-[#0d0d0d] group-hover:flex"
-                >
-                  <IconSettings size={16} stroke={2.5} />
-                </button>
-              )}
-            </div>
-          );
-        })}
-        <button
-          onClick={() => setCreating(true)}
-          aria-label="Новая коллекция"
-          title="Новая коллекция"
-          className="icon-btn h-9 w-9"
-        >
-          <IconPlus size={18} stroke={2.5} />
-        </button>
-      </div>
+      <CollectionTabs
+        collections={collections}
+        activeId={activeId}
+        isAllView={isAllView}
+        collectionsLoaded={collectionsLoaded}
+        allGamesCount={allGamesCount}
+        onSelect={setActiveId}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onCreate={() => setCreating(true)}
+      />
 
       {/* Подсказка о доступе для не-владельцев */}
       {!isAllView && activeCollection && !isOwner && (
@@ -574,61 +409,21 @@ export default function CollectionApp() {
         </div>
       )}
 
-      {/* Быстрые фильтры по данным BGG */}
-      {quickFilters.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {quickFilters.map((f) => {
-            const c = colorForKey(f.key);
-            const active = quickFilter === f.key;
-            return (
-              <button
-                key={f.key}
-                onClick={() => setQuickFilter(active ? null : f.key)}
-                style={
-                  active
-                    ? {
-                        backgroundColor: c,
-                        borderColor: c,
-                        color: "#0d0d0d",
-                      }
-                    : { borderColor: c, color: c }
-                }
-                className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
-              >
-                {f.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Фильтр по тегам */}
-      {allTags.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {allTags.map((tag) => {
-            const c = colorForKey(tag);
-            const active = tagFilters.includes(tag);
-            return (
-              <button
-                key={tag}
-                onClick={() => setTagFilters(active ? tagFilters.filter((t) => t !== tag) : [...tagFilters, tag])}
-                style={
-                  active
-                    ? {
-                        backgroundColor: c,
-                        borderColor: c,
-                        color: "#0d0d0d",
-                      }
-                    : { borderColor: c, color: c }
-                }
-                className="rounded-full border-[3px] px-3.5 py-1.5 text-sm font-bold transition"
-              >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Быстрые фильтры и фильтр по тегам */}
+      <FilterBar
+        quickFilters={quickFilters}
+        activeQuickKey={quickFilter}
+        onQuickToggle={(key) =>
+          setQuickFilter((cur) => (cur === key ? null : key))
+        }
+        allTags={allTags}
+        tagFilters={tagFilters}
+        onTagToggle={(tag) =>
+          setTagFilters((prev) =>
+            prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+          )
+        }
+      />
 
       {/* Добавление игр и выбор нескольких для перемещения */}
       {loaded &&
@@ -674,292 +469,26 @@ export default function CollectionApp() {
           </div>
         )}
 
-      {/* Сетка игр */}
-      {!loaded || !collectionsLoaded ? (
-        <p className="py-16 text-center font-semibold text-muted">Загрузка…</p>
-      ) : visibleGames.length === 0 ? (
-        <div className="surface mx-auto mt-4 max-w-md px-6 py-12 text-center">
-          <div className="mb-3 flex justify-center text-ink/30">
-            {games.length === 0 ? (
-              <IconDice5Filled size={56} />
-            ) : (
-              <IconSearch size={56} />
-            )}
-          </div>
-          <p className="font-medium text-ink/70">
-            {games.length === 0
-              ? canEdit
-                ? "Коллекция пуста. Скажите или напишите команду, либо загрузите фото полки с играми."
-                : "В этой коллекции пока нет игр."
-              : "Нет игр по выбранному фильтру."}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-flow-row-dense grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {nodes.map((node, i) => {
-            const { game, orphanBase, expansions } = node;
-            const isOrphan = !!orphanBase;
-            const editable = !isOrphan && canEditGame(game);
-            const selected = selectedIds.has(game.id);
-            const selectMode = selecting && editable;
-            const expanded = expandedKey === node.key;
-            // Карточка занимает 2 колонки и пока разворачивается, и пока
-            // закрывается (чтобы блок успел плавно ужаться обратно).
-            const wide = expanded || closingKey === node.key;
-            const hasExp = expansions.length > 0;
-            // Ширина блока: «полная» (2 колонки) только когда открыт и анимация
-            // запущена; иначе — одна колонка (старт открытия / цель закрытия).
-            const cardWidth = wide
-              ? open && expanded
-                ? "100%"
-                : cardColWidth != null
-                  ? `${cardColWidth}px`
-                  : undefined
-              : undefined;
-
-            // Что рисуем на главной плитке: для сирот — отсутствующая база (ч/б).
-            const coverThumb = isOrphan ? orphanBase!.thumbnailUrl : game.thumbnailUrl;
-            const coverLarge = isOrphan ? orphanBase!.imageUrl : game.imageUrl;
-            const coverName = isOrphan ? orphanBase!.name : game.name;
-            const href = `/game/${game.gameId}?c=${game.collectionId}`;
-
-            const cover = (
-              <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
-                {coverThumb || coverLarge ? (
-                  <ProgressiveImage
-                    smallUrl={coverThumb}
-                    largeUrl={coverLarge}
-                    alt={coverName}
-                    className={`h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 ${
-                      isOrphan ? "opacity-60 grayscale" : ""
-                    }`}
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-ink/30">
-                    <IconDice5Filled size={48} />
-                  </div>
-                )}
-              </div>
-            );
-
-            return (
-              <div
-                key={node.key}
-                style={
-                  { "--ring": colorAt(i), width: cardWidth } as React.CSSProperties
-                }
-                onClickCapture={
-                  selectMode
-                    ? (e) => {
-                        e.preventDefault();
-                        toggleSelected(game.id);
-                      }
-                    : undefined
-                }
-                className={`tile group relative overflow-hidden ${
-                  wide
-                    ? "col-span-2 justify-self-start transition-[width] duration-300 ease-out"
-                    : ""
-                } ${selectMode ? "cursor-pointer" : ""} ${
-                  selected ? "ring-4 ring-brand" : ""
-                } ${selecting && !editable ? "opacity-40" : ""}`}
-              >
-                {/* Левая часть — задаёт высоту карточки. В развёрнутом виде её
-                    ширина зафиксирована на замеренной ширине одной колонки,
-                    поэтому квадратная обложка и высота карточки не меняются, пока
-                    блок растёт в ширину. */}
-                <div
-                  className={`relative ${wide ? "shrink-0" : ""}`}
-                  style={
-                    wide && leftColWidth != null
-                      ? { width: `${leftColWidth}px` }
-                      : undefined
-                  }
-                >
-                    {selectMode && (
-                      <div className="absolute left-2 top-2 z-10">
-                        {selected ? (
-                          <IconCircleCheckFilled size={26} className="text-brand" />
-                        ) : (
-                          <span className="block h-[22px] w-[22px] rounded-full border-[3px] border-ink bg-white/80" />
-                        )}
-                      </div>
-                    )}
-                    {isOrphan ? cover : <Link href={href}>{cover}</Link>}
-                    <div className="p-3">
-                      {isOrphan ? (
-                        <h3 className="truncate font-bold text-ink/40" title={coverName}>
-                          {coverName}
-                        </h3>
-                      ) : (
-                        <Link href={href}>
-                          <h3
-                            className="truncate font-bold text-ink hover:text-brand"
-                            title={coverName}
-                          >
-                            {coverName}
-                          </h3>
-                        </Link>
-                      )}
-                      {isOrphan ? (
-                        <p className="mt-1 text-xs font-medium text-ink/40">
-                          Базы нет в коллекции
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-xs font-medium text-ink/55">
-                          {game.minPlayers && game.maxPlayers
-                            ? game.minPlayers === game.maxPlayers
-                              ? `${game.minPlayers} игр.`
-                              : `${game.minPlayers}–${game.maxPlayers} игр.`
-                            : ""}
-                          {game.playingTime ? ` · ${game.playingTime} мин` : ""}
-                          {game.rating ? (
-                            <span className="inline-flex items-center gap-0.5 align-middle font-bold text-orange">
-                              {" · "}
-                              <IconStarFilled size={11} />
-                              {Number(game.rating).toFixed(1)}
-                            </span>
-                          ) : (
-                            ""
-                          )}
-                        </p>
-                      )}
-                      {!isOrphan && game.tags.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {game.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              style={{ backgroundColor: colorForKey(tag) }}
-                              className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {/* Бейдж «+N допов» с превью — разворачивает карточку */}
-                      {hasExp && (
-                        <button
-                          type="button"
-                          onClick={(e) =>
-                            toggleExpanded(
-                              node.key,
-                              e.currentTarget.closest(".tile")?.firstElementChild,
-                            )
-                          }
-                          aria-expanded={expanded}
-                          className="mt-2 flex items-center -space-x-2 rounded-full p-1 text-left transition hover:bg-brand-soft"
-                        >
-                          <span className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink bg-brand">
-                              +{expansions.length} {pluralExpansions(expansions.length)}
-                          </span>
-                          {expansions.slice(0, 3).map((exp) => (
-                            <span
-                              key={exp.gameId}
-                              className="h-6 w-6 shrink-0 overflow-hidden rounded-full border-2 border-ink bg-brand-soft"
-                            >
-                              {exp.thumbnailUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={exp.thumbnailUrl}
-                                  alt={exp.name}
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                <span className="flex h-full w-full items-center justify-center text-ink/40">
-                                  <IconPuzzle size={13} />
-                                </span>
-                              )}
-                            </span>
-                          ))}
-                          <span className="flex items-center justify-center h-6 w-6 shrink-0 overflow-hidden rounded-full border-2 border-ink bg-white text-ink">
-                            <IconArrowRight size={16} />
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                    {editable && !selecting && (
-                      <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
-                        <button
-                          onClick={() => setMoving(game)}
-                          title="Переместить в другую коллекцию"
-                          aria-label={`Переместить ${game.name}`}
-                          className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-brand hover:text-white"
-                        >
-                          <IconFolderSymlink size={16} stroke={2.5} />
-                        </button>
-                        <button
-                          onClick={() => removeGame(game)}
-                          title="Удалить из коллекции"
-                          aria-label={`Удалить ${game.name}`}
-                          className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white"
-                        >
-                          <IconX size={16} stroke={3} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                {/* Правая часть — абсолютная панель: высоту задаёт левая колонка
-                    (карточка не растёт в высоту), левый край — на границе левой
-                    части, правый прижат к краю блока. Раскрывается вместе с ростом
-                    ширины блока (клиппится его overflow-hidden). */}
-                {hasExp && wide && (
-                  <div
-                    aria-hidden={!expanded}
-                    style={
-                      leftColWidth != null
-                        ? { left: `${leftColWidth}px` }
-                        : undefined
-                    }
-                    className="absolute bottom-0 right-0 top-0 flex flex-col gap-1 overflow-y-auto border-l-[3px] border-ink bg-brand-soft/30 p-2"
-                  >
-                    {expansions.map((exp, idx) => (
-                      <Link
-                        key={exp.gameId}
-                        href={`/game/${exp.gameId}?c=${exp.collectionId}`}
-                        className={`flex items-center gap-1 ${idx === 0 ? 'rounded-tr-lg' : ''} ${idx === expansions.length - 1 ? 'rounded-br-lg' : ''} border-3 border-ink bg-white transition hover:bg-brand hover:text-white`}
-                      >
-                        <span className="relative h-14 w-14 shrink-0 overflow-hidden border-r-3 border-ink bg-brand-soft">
-                          {exp.thumbnailUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={exp.thumbnailUrl}
-                              alt={exp.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <span className="flex h-full w-full items-center justify-center text-ink/30">
-                              <IconPuzzle size={20} />
-                            </span>
-                          )}
-                        </span>
-                        <span className="min-w-0 flex-1 line-clamp-2 leading-none text-xs font-bold">
-                          {exp.name}
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Маяк бесконечной прокрутки + ручная кнопка (нужна, когда фильтр
-          оставил мало строк и автоскролл не срабатывает). */}
-      {loaded && nextCursor && (
-        <div ref={sentinelRef} className="flex justify-center py-6">
-          <button
-            onClick={loadMore}
-            disabled={loadingMore}
-            className="rounded-full border-[3px] border-ink bg-white px-5 py-2 font-semibold text-ink hover:bg-brand hover:text-white disabled:opacity-50"
-          >
-            {loadingMore ? "Загрузка…" : "Показать ещё"}
-          </button>
-        </div>
-      )}
+      {/* Сетка игр (key сбрасывает разворот карточки при смене вида) */}
+      <GameGrid
+        key={activeId}
+        nodes={nodes}
+        loaded={loaded}
+        collectionsLoaded={collectionsLoaded}
+        gamesCount={games.length}
+        visibleCount={visibleGames.length}
+        canEdit={canEdit}
+        canEditGame={canEditGame}
+        selecting={selecting}
+        selectedIds={selectedIds}
+        onToggleSelected={toggleSelected}
+        onMove={setMoving}
+        onRemove={removeGame}
+        nextCursor={nextCursor}
+        loadingMore={loadingMore}
+        loadMore={loadMore}
+        sentinelRef={sentinelRef}
+      />
 
       {addingGames && canRunCommands && (
         <Modal title="Добавить игры" onClose={() => setAddingGames(false)}>
