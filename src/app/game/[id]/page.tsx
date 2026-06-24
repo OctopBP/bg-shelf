@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCollectionGame } from "@/lib/collection";
+import { getCollectionGame, getCollectionExpansionMap } from "@/lib/collection";
 import GameDetail from "@/components/GameDetail";
 
 export default async function GamePage({
@@ -33,10 +33,14 @@ export default async function GamePage({
     .maybeSingle();
   const canEdit = membership?.role === "owner" || membership?.role === "editor";
 
+  // Дополнения этой игры, присутствующие в коллекции (для блока внизу страницы).
+  const expansionMap = await getCollectionExpansionMap(supabase, [collectionId]);
+  const expansions = expansionMap.byBase[id] ?? [];
+
   return (
     <main className="min-h-screen">
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-8 sm:py-10">
-        <GameDetail game={game} canEdit={canEdit} />
+        <GameDetail game={game} canEdit={canEdit} expansions={expansions} />
       </div>
     </main>
   );

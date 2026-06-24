@@ -12,6 +12,7 @@ import {
   IconLock,
   IconMessage2,
   IconPlus,
+  IconPuzzle,
   IconSearch,
   IconSettings,
   IconStarFilled,
@@ -29,7 +30,13 @@ import MoveGameDialog from "./MoveGameDialog";
 import AddGamesDialog, { type ResolvedGame } from "./AddGamesDialog";
 import { colorAt, colorForKey } from "@/lib/palette";
 import type { CollectionRole, CollectionVisibility } from "@/lib/collections";
-import { useCollectionData, ALL, type CollectionGame } from "@/hooks/useCollectionData";
+import {
+  useCollectionData,
+  ALL,
+  type CollectionGame,
+  type ExpansionSummary,
+  type BaseSummary,
+} from "@/hooks/useCollectionData";
 import ProgressiveImage from "./ProgressiveImage";
 
 const VISIBILITY_OPTIONS: {
@@ -51,6 +58,27 @@ function pluralGames(n: number): string {
     return "игры";
   }
   return "игр";
+}
+
+/** Склонение «доп» по числу: 1 доп, 2 допа, 5 допов. */
+function pluralExpansions(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "доп";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "допа";
+  return "допов";
+}
+
+/** Узел сетки: базовая/обычная игра, либо «осиротевшее» дополнение (базы нет
+ *  в коллекции) — тогда главная плитка рисует ч/б обложку отсутствующей базы. */
+interface GridNode {
+  key: string;
+  /** Якорная запись коллекции (база/обычная игра или представитель сирот). */
+  game: CollectionGame;
+  /** Отсутствующая в коллекции база — рисуем её плитку ч/б. */
+  orphanBase?: BaseSummary;
+  /** Дополнения этого узла, присутствующие в коллекции. */
+  expansions: ExpansionSummary[];
 }
 
 // Быстрые фильтры по данным BGG — применяются в связке (И) с фильтром по тегам.
@@ -89,6 +117,7 @@ export default function CollectionApp() {
     isAllView,
     loadCollections,
     games,
+    expansionMap,
     loaded,
     nextCursor,
     loadingMore,
@@ -110,6 +139,39 @@ export default function CollectionApp() {
   // Режим выбора нескольких игр для пакетного перемещения.
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Какой узел сетки развёрнут (показывает список дополнений справа) и какой
+  // сейчас закрывается — закрывающийся держим в ширину 2 колонок, пока блок
+  // ужимается обратно, иначе сетка схлопнулась бы рывком до конца анимации.
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [closingKey, setClosingKey] = useState<string | null>(null);
+  // Замеренные при открытии ширины (px): всей карточки в одну колонку и её левой
+  // части. Левую часть фиксируем на этой ширине на всё время анимации — поэтому
+  // обложка и высота карточки не меняются, а сам блок плавно растёт в ширину.
+  const [cardColWidth, setCardColWidth] = useState<number | null>(null);
+  const [leftColWidth, setLeftColWidth] = useState<number | null>(null);
+  // true → ширина карточки должна быть «полной» (2 колонки); запускаем на
+  // следующем кадре после старта, чтобы сработал transition ширины.
+  const [open, setOpen] = useState(false);
+
+  // Разворот/сворачивание карточки с анимацией ширины самого блока.
+  function toggleExpanded(key: string, leftCol: Element | null | undefined) {
+    if (expandedKey === key) {
+      // Закрытие: ширина едет обратно к одной колонке, затем снимаем span.
+      setOpen(false);
+      setExpandedKey(null);
+      setClosingKey(key);
+      window.setTimeout(() => setClosingKey((c) => (c === key ? null : c)), 300);
+      return;
+    }
+    // Открытие: запоминаем ширину одной колонки, стартуем с неё и на следующем
+    // кадре разгоняем до полной ширины (2 колонки).
+    const tile = leftCol?.parentElement;
+    setCardColWidth(tile ? Math.round(tile.getBoundingClientRect().width) : null);
+    setLeftColWidth(leftCol ? Math.round(leftCol.getBoundingClientRect().width) : null);
+    setOpen(false);
+    setExpandedKey(key);
+    requestAnimationFrame(() => requestAnimationFrame(() => setOpen(true)));
+  }
   const [bulkMoving, setBulkMoving] = useState(false);
   const [proposal, setProposal] = useState<ResolvedGame[] | null>(null);
   // Растёт с каждым новым предложением — служит key, чтобы окно добавления
@@ -140,6 +202,9 @@ export default function CollectionApp() {
     setQuickFilter(null);
     setSelecting(false);
     setSelectedIds(new Set());
+    setExpandedKey(null);
+    setClosingKey(null);
+    setOpen(false);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [activeId]);
 
@@ -359,6 +424,35 @@ export default function CollectionApp() {
       ),
     [games, tagFilters, activeQuick],
   );
+
+  // Группировка дополнений: дополнения, чья база есть в коллекции, прячем из
+  // сетки (они уйдут в панель базы); осиротевшие дополнения собираем в один узел
+  // под ч/б плиткой отсутствующей базы; остальное — обычные узлы.
+  const nodes: GridNode[] = useMemo(() => {
+    const out: GridNode[] = [];
+    const seenOrphanBase = new Set<number>();
+    for (const g of visibleGames) {
+      const base = expansionMap.expansionToBase[g.gameId];
+      if (base?.present) continue; // сгруппировано под своей базой
+      if (base && !base.present) {
+        if (seenOrphanBase.has(base.gameId)) continue;
+        seenOrphanBase.add(base.gameId);
+        out.push({
+          key: `orphan-${base.gameId}`,
+          game: g,
+          orphanBase: base,
+          expansions: expansionMap.byBase[base.gameId] ?? [],
+        });
+        continue;
+      }
+      out.push({
+        key: g.id,
+        game: g,
+        expansions: expansionMap.byBase[g.gameId] ?? [],
+      });
+    }
+    return out;
+  }, [visibleGames, expansionMap]);
 
   return (
     <div
@@ -601,120 +695,250 @@ export default function CollectionApp() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {visibleGames.map((game, i) => {
-            const editable = canEditGame(game);
+        <div className="grid grid-flow-row-dense grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          {nodes.map((node, i) => {
+            const { game, orphanBase, expansions } = node;
+            const isOrphan = !!orphanBase;
+            const editable = !isOrphan && canEditGame(game);
             const selected = selectedIds.has(game.id);
             const selectMode = selecting && editable;
+            const expanded = expandedKey === node.key;
+            // Карточка занимает 2 колонки и пока разворачивается, и пока
+            // закрывается (чтобы блок успел плавно ужаться обратно).
+            const wide = expanded || closingKey === node.key;
+            const hasExp = expansions.length > 0;
+            // Ширина блока: «полная» (2 колонки) только когда открыт и анимация
+            // запущена; иначе — одна колонка (старт открытия / цель закрытия).
+            const cardWidth = wide
+              ? open && expanded
+                ? "100%"
+                : cardColWidth != null
+                  ? `${cardColWidth}px`
+                  : undefined
+              : undefined;
+
+            // Что рисуем на главной плитке: для сирот — отсутствующая база (ч/б).
+            const coverThumb = isOrphan ? orphanBase!.thumbnailUrl : game.thumbnailUrl;
+            const coverLarge = isOrphan ? orphanBase!.imageUrl : game.imageUrl;
+            const coverName = isOrphan ? orphanBase!.name : game.name;
+            const href = `/game/${game.gameId}?c=${game.collectionId}`;
+
+            const cover = (
+              <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
+                {coverThumb || coverLarge ? (
+                  <ProgressiveImage
+                    smallUrl={coverThumb}
+                    largeUrl={coverLarge}
+                    alt={coverName}
+                    className={`h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 ${
+                      isOrphan ? "opacity-60 grayscale" : ""
+                    }`}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-ink/30">
+                    <IconDice5Filled size={48} />
+                  </div>
+                )}
+              </div>
+            );
+
             return (
               <div
-                key={game.id}
+                key={node.key}
                 style={
-                  {
-                    "--ring": colorAt(i),
-                  } as React.CSSProperties
+                  { "--ring": colorAt(i), width: cardWidth } as React.CSSProperties
                 }
                 onClickCapture={
-                  selecting
+                  selectMode
                     ? (e) => {
                         e.preventDefault();
-                        if (editable) {
-                          toggleSelected(game.id);
-                        }
+                        toggleSelected(game.id);
                       }
                     : undefined
                 }
                 className={`tile group relative overflow-hidden ${
-                  selectMode ? "cursor-pointer" : ""
-                } ${selected ? "ring-4 ring-brand" : ""} ${
-                  selecting && !editable ? "opacity-40" : ""
-                }`}
+                  wide
+                    ? "col-span-2 justify-self-start transition-[width] duration-300 ease-out"
+                    : ""
+                } ${selectMode ? "cursor-pointer" : ""} ${
+                  selected ? "ring-4 ring-brand" : ""
+                } ${selecting && !editable ? "opacity-40" : ""}`}
               >
-                {selectMode && (
-                  <div className="absolute left-2 top-2 z-10">
-                    {selected ? (
-                      <IconCircleCheckFilled size={26} className="text-brand" />
-                    ) : (
-                      <span className="block h-[22px] w-[22px] rounded-full border-[3px] border-ink bg-white/80" />
+                {/* Левая часть — задаёт высоту карточки. В развёрнутом виде её
+                    ширина зафиксирована на замеренной ширине одной колонки,
+                    поэтому квадратная обложка и высота карточки не меняются, пока
+                    блок растёт в ширину. */}
+                <div
+                  className={`relative ${wide ? "shrink-0" : ""}`}
+                  style={
+                    wide && leftColWidth != null
+                      ? { width: `${leftColWidth}px` }
+                      : undefined
+                  }
+                >
+                    {selectMode && (
+                      <div className="absolute left-2 top-2 z-10">
+                        {selected ? (
+                          <IconCircleCheckFilled size={26} className="text-brand" />
+                        ) : (
+                          <span className="block h-[22px] w-[22px] rounded-full border-[3px] border-ink bg-white/80" />
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
-                <Link href={`/game/${game.gameId}?c=${game.collectionId}`}>
-                  <div className="aspect-square overflow-hidden border-b-[3px] border-ink bg-brand-soft">
-                    {game.imageUrl || game.thumbnailUrl ? (
-                      <ProgressiveImage
-                        smallUrl={game.thumbnailUrl}
-                        largeUrl={game.imageUrl}
-                        alt={game.name}
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-ink/30">
-                        <IconDice5Filled size={48} />
+                    {isOrphan ? cover : <Link href={href}>{cover}</Link>}
+                    <div className="p-3">
+                      {isOrphan ? (
+                        <h3 className="truncate font-bold text-ink/40" title={coverName}>
+                          {coverName}
+                        </h3>
+                      ) : (
+                        <Link href={href}>
+                          <h3
+                            className="truncate font-bold text-ink hover:text-brand"
+                            title={coverName}
+                          >
+                            {coverName}
+                          </h3>
+                        </Link>
+                      )}
+                      {isOrphan ? (
+                        <p className="mt-1 text-xs font-medium text-ink/40">
+                          Базы нет в коллекции
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs font-medium text-ink/55">
+                          {game.minPlayers && game.maxPlayers
+                            ? game.minPlayers === game.maxPlayers
+                              ? `${game.minPlayers} игр.`
+                              : `${game.minPlayers}–${game.maxPlayers} игр.`
+                            : ""}
+                          {game.playingTime ? ` · ${game.playingTime} мин` : ""}
+                          {game.rating ? (
+                            <span className="inline-flex items-center gap-0.5 align-middle font-bold text-orange">
+                              {" · "}
+                              <IconStarFilled size={11} />
+                              {Number(game.rating).toFixed(1)}
+                            </span>
+                          ) : (
+                            ""
+                          )}
+                        </p>
+                      )}
+                      {!isOrphan && game.tags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {game.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              style={{ backgroundColor: colorForKey(tag) }}
+                              className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {/* Бейдж «+N допов» с превью — разворачивает карточку */}
+                      {hasExp && (
+                        <button
+                          type="button"
+                          onClick={(e) =>
+                            toggleExpanded(
+                              node.key,
+                              e.currentTarget.closest(".tile")?.firstElementChild,
+                            )
+                          }
+                          aria-expanded={expanded}
+                          className="mt-2 flex items-center -space-x-2 rounded-full p-1 text-left transition hover:bg-brand-soft"
+                        >
+                          <span className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink bg-brand">
+                              +{expansions.length} {pluralExpansions(expansions.length)}
+                          </span>
+                          {expansions.slice(0, 3).map((exp) => (
+                            <span
+                              key={exp.gameId}
+                              className="h-6 w-6 shrink-0 overflow-hidden rounded-full border-2 border-ink bg-brand-soft"
+                            >
+                              {exp.thumbnailUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={exp.thumbnailUrl}
+                                  alt={exp.name}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span className="flex h-full w-full items-center justify-center text-ink/40">
+                                  <IconPuzzle size={13} />
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                          <span className="flex items-center justify-center h-6 w-6 shrink-0 overflow-hidden rounded-full border-2 border-ink bg-white text-ink">
+                            <IconArrowRight size={16} />
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                    {editable && !selecting && (
+                      <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
+                        <button
+                          onClick={() => setMoving(game)}
+                          title="Переместить в другую коллекцию"
+                          aria-label={`Переместить ${game.name}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-brand hover:text-white"
+                        >
+                          <IconFolderSymlink size={16} stroke={2.5} />
+                        </button>
+                        <button
+                          onClick={() => removeGame(game)}
+                          title="Удалить из коллекции"
+                          aria-label={`Удалить ${game.name}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white"
+                        >
+                          <IconX size={16} stroke={3} />
+                        </button>
                       </div>
                     )}
                   </div>
-                </Link>
-                <div className="p-3">
-                  <Link href={`/game/${game.gameId}?c=${game.collectionId}`}>
-                    <h3
-                      className="truncate font-bold text-ink hover:text-brand"
-                      title={game.name}
-                    >
-                      {game.name}
-                    </h3>
-                  </Link>
-                  <p className="mt-1 text-xs font-medium text-ink/55">
-                    {game.minPlayers && game.maxPlayers
-                      ? game.minPlayers === game.maxPlayers
-                        ? `${game.minPlayers} игр.`
-                        : `${game.minPlayers}–${game.maxPlayers} игр.`
-                      : ""}
-                    {game.playingTime ? ` · ${game.playingTime} мин` : ""}
-                    {game.rating ? (
-                      <span className="inline-flex items-center gap-0.5 align-middle font-bold text-orange">
-                        {" · "}
-                        <IconStarFilled size={11} />
-                        {Number(game.rating).toFixed(1)}
-                      </span>
-                    ) : (
-                      ""
-                    )}
-                  </p>
-                  {game.tags.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {game.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          style={{
-                            backgroundColor: colorForKey(tag),
-                          }}
-                          className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-bold text-ink"
-                        >
-                          {tag}
+
+                {/* Правая часть — абсолютная панель: высоту задаёт левая колонка
+                    (карточка не растёт в высоту), левый край — на границе левой
+                    части, правый прижат к краю блока. Раскрывается вместе с ростом
+                    ширины блока (клиппится его overflow-hidden). */}
+                {hasExp && wide && (
+                  <div
+                    aria-hidden={!expanded}
+                    style={
+                      leftColWidth != null
+                        ? { left: `${leftColWidth}px` }
+                        : undefined
+                    }
+                    className="absolute bottom-0 right-0 top-0 flex flex-col gap-1 overflow-y-auto border-l-[3px] border-ink bg-brand-soft/30 p-2"
+                  >
+                    {expansions.map((exp, idx) => (
+                      <Link
+                        key={exp.gameId}
+                        href={`/game/${exp.gameId}?c=${exp.collectionId}`}
+                        className={`flex items-center gap-1 ${idx === 0 ? 'rounded-tr-lg' : ''} ${idx === expansions.length - 1 ? 'rounded-br-lg' : ''} border-3 border-ink bg-white transition hover:bg-brand hover:text-white`}
+                      >
+                        <span className="relative h-14 w-14 shrink-0 overflow-hidden border-r-3 border-ink bg-brand-soft">
+                          {exp.thumbnailUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={exp.thumbnailUrl}
+                              alt={exp.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span className="flex h-full w-full items-center justify-center text-ink/30">
+                              <IconPuzzle size={20} />
+                            </span>
+                          )}
                         </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {editable && !selecting && (
-                  <div className="absolute right-2 top-2 hidden flex-col gap-1.5 group-hover:flex">
-                    <button
-                      onClick={() => setMoving(game)}
-                      title="Переместить в другую коллекцию"
-                      aria-label={`Переместить ${game.name}`}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-brand hover:text-white"
-                    >
-                      <IconFolderSymlink size={16} stroke={2.5} />
-                    </button>
-                    <button
-                      onClick={() => removeGame(game)}
-                      title="Удалить из коллекции"
-                      aria-label={`Удалить ${game.name}`}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-ink bg-white text-ink hover:bg-coral hover:text-white"
-                    >
-                      <IconX size={16} stroke={3} />
-                    </button>
+                        <span className="min-w-0 flex-1 line-clamp-2 leading-none text-xs font-bold">
+                          {exp.name}
+                        </span>
+                      </Link>
+                    ))}
                   </div>
                 )}
               </div>

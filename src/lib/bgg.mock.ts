@@ -9,7 +9,10 @@ import type { BggGameDetails } from "./bgg";
 // его вычисляет lib/bgg.ts из primary-имени, которое мок-обработчик строит
 // именно из `name`.
 export interface MockGame
-  extends Omit<BggGameDetails, "originalName" | "expansions"> {
+  extends Omit<
+    BggGameDetails,
+    "originalName" | "expansions" | "isExpansion" | "baseGames"
+  > {
   /** Подстроки для распознавания игры в запросе/команде (нижний регистр) */
   aliases: string[];
   /** Русское (кириллическое) название — отдаётся как alternate-имя BGG */

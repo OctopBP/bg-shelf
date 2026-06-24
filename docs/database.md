@@ -181,6 +181,23 @@ agent читает ≤ 200. Ни один запрос не приближает
 - Агент: `list_collection` отдаёт `game_id`; `remove`/`set_tags` — по `game_id`;
   `add_to_collection` — по `bgg_id` (поиск идёт через BGG).
 
+### Дополнения: `game_links` + `is_expansion` (миграция 20260624120000)
+
+- `games.is_expansion` и `game_links` (`from`=дополнение, `to`=база,
+  `link_type='expansion'`) заведены ещё в `20260622120000`, но до
+  `20260624120000` не заполнялись. Теперь:
+  - `cache_game` принимает `p_is_expansion` (проставляется при ВСТАВКЕ);
+  - `link_expansion(from, to)` — SECURITY DEFINER, обычный пользователь создаёт
+    связь в обход RLS (как `cache_game` пополняет `games`).
+- При добавлении дополнения `addGameToCollection` кэширует его базовые игры (для
+  обложки/названия, в т.ч. ч/б у «осиротевших») и создаёт связи.
+- Чтение для UI: `getCollectionExpansionMap(supabase, collectionIds)` строит карту
+  `byBase` / `expansionToBase` по всей коллекции (без пагинации) — главный экран
+  группирует дополнения под базой, страница игры показывает список дополнений.
+- Бэкфилл уже добавленных игр (флаг `is_expansion` существующих строк cache_game
+  не обновляет): `npx tsx --env-file=.env.local scripts/backfill-expansions.ts`
+  (нужен `SUPABASE_SERVICE_ROLE_KEY`). Идемпотентен.
+
 ### Разгрузка god-table `games`
 
 - BGG-метрики (`rank`, `bayes_average`, `average`, `users_rated`,

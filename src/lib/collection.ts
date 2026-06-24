@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { getBggGameDetails } from "./bgg";
+import { getBggGameDetails, type BggGameDetails } from "./bgg";
 import { logger } from "./logger";
 import {
   clampLimit,
@@ -47,6 +47,8 @@ export interface CollectionGame {
   description: string | null;
   categories: string[];
   mechanics: string[];
+  /** true — сама игра является дополнением (games.is_expansion). */
+  isExpansion: boolean;
   tags: string[];
   notes: string | null;
   addedAt: string;
@@ -86,10 +88,71 @@ function mapRow(row: CollectionItemRow): CollectionGame {
     description: game.description ?? null,
     categories: game.categories ?? [],
     mechanics: game.mechanics ?? [],
+    isExpansion: game.is_expansion ?? false,
     tags: row.tags ?? [],
     notes: row.notes ?? null,
     addedAt: row.added_at,
   };
+}
+
+/** Пополняет каталог games деталями BGG через SECURITY DEFINER функцию
+ *  cache_game и возвращает наш games.id. Кэш игр закрыт на прямую запись
+ *  (RLS — только админ); cache_game лишь ВСТАВЛЯЕТ отсутствующую игру и никогда
+ *  не перезаписывает существующую (защита от вандализма). См. 20260622150000. */
+async function cacheGameFromDetails(
+  supabase: DB,
+  details: BggGameDetails
+): Promise<number> {
+  const { data: cached, error } = await supabase.rpc("cache_game", {
+    p_bgg_id: details.bggId,
+    p_name: details.name,
+    p_original_name: details.originalName ?? undefined,
+    p_year_published: details.yearPublished ?? undefined,
+    p_image_url: details.imageUrl ?? undefined,
+    p_thumbnail_url: details.thumbnailUrl ?? undefined,
+    p_min_players: details.minPlayers ?? undefined,
+    p_max_players: details.maxPlayers ?? undefined,
+    p_playing_time: details.playingTime ?? undefined,
+    p_rating: details.rating ?? undefined,
+    p_weight: details.weight ?? undefined,
+    p_description: details.description ?? undefined,
+    p_categories: details.categories,
+    p_mechanics: details.mechanics,
+    p_is_expansion: details.isExpansion,
+  });
+  if (error) {
+    log.error("cache_game упал:", error);
+    throw new Error(`Не удалось сохранить игру: ${error.message}`);
+  }
+  const gameId = cached?.id;
+  if (!gameId) throw new Error("cache_game не вернул id игры");
+  return gameId;
+}
+
+/** Если игра — дополнение, кэширует её базовые игры и создаёт связи в game_links
+ *  (через SECURITY DEFINER link_expansion). Best-effort: ошибки не валят
+ *  добавление самой игры. Базу кэшируем, чтобы её обложку/название можно было
+ *  показать (в т.ч. ч/б) даже когда базовой игры нет в коллекции. */
+async function linkExpansionBases(
+  supabase: DB,
+  expansionGameId: number,
+  details: BggGameDetails
+): Promise<void> {
+  if (!details.isExpansion || details.baseGames.length === 0) return;
+  for (const base of details.baseGames) {
+    try {
+      const baseDetails = await getBggGameDetails(base.bggId);
+      if (!baseDetails) continue;
+      const baseGameId = await cacheGameFromDetails(supabase, baseDetails);
+      const { error } = await supabase.rpc("link_expansion", {
+        p_from_game_id: expansionGameId,
+        p_to_game_id: baseGameId,
+      });
+      if (error) log.error(`link_expansion ${expansionGameId}→${baseGameId}:`, error.message);
+    } catch (e) {
+      log.error(`связь с базой bggId=${base.bggId} не создана:`, e);
+    }
+  }
 }
 
 /** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию. */
@@ -108,36 +171,9 @@ export async function addGameToCollection(
   }
   log.info(`детали из BGG: «${details.name}» (${details.yearPublished})`);
 
-  // Кэш игр закрыт на прямую запись (RLS — только админ). Обычный пользователь
-  // пополняет каталог через SECURITY DEFINER функцию cache_game: она лишь
-  // ВСТАВЛЯЕТ отсутствующую игру и никогда не перезаписывает существующую
-  // запись (защита от вандализма). См. миграцию 20260622150000.
   // cache_game возвращает строку games (с нашим id) — по нему привязываем запись
   // коллекции (collection_items.game_id), не зная деталей внутреннего id заранее.
-  const { data: cached, error: gameError } = await supabase.rpc("cache_game", {
-    p_bgg_id: details.bggId,
-    p_name: details.name,
-    p_original_name: details.originalName ?? undefined,
-    p_year_published: details.yearPublished ?? undefined,
-    p_image_url: details.imageUrl ?? undefined,
-    p_thumbnail_url: details.thumbnailUrl ?? undefined,
-    p_min_players: details.minPlayers ?? undefined,
-    p_max_players: details.maxPlayers ?? undefined,
-    p_playing_time: details.playingTime ?? undefined,
-    p_rating: details.rating ?? undefined,
-    p_weight: details.weight ?? undefined,
-    p_description: details.description ?? undefined,
-    p_categories: details.categories,
-    p_mechanics: details.mechanics,
-  });
-  if (gameError) {
-    log.error("cache_game упал:", gameError);
-    throw new Error(`Не удалось сохранить игру: ${gameError.message}`);
-  }
-  const gameId = cached?.id;
-  if (!gameId) {
-    throw new Error("cache_game не вернул id игры");
-  }
+  const gameId = await cacheGameFromDetails(supabase, details);
 
   const { error: itemError } = await supabase.from("collection_items").upsert(
     { collection_id: collectionId, game_id: gameId, tags, added_by: userId ?? null },
@@ -147,6 +183,9 @@ export async function addGameToCollection(
     log.error("upsert collection_items упал:", itemError);
     throw new Error(`Не удалось добавить в коллекцию: ${itemError.message}`);
   }
+
+  // Дополнение — связываем с базовыми играми (после добавления, best-effort).
+  await linkExpansionBases(supabase, gameId, details);
 
   log.info(`«${details.name}» добавлена в collection=${collectionId}`);
   return { name: details.name };
@@ -405,6 +444,138 @@ export async function getLocalThumbnails(
   return out;
 }
 
+/** Коллекции, в которых состоит пользователь (как вкладки и сводный вид). */
+export async function getMemberCollectionIds(
+  supabase: DB,
+  userId: string
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("collection_members")
+    .select("collection_id")
+    .eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((m) => m.collection_id);
+}
+
+/** Сводка дополнения, присутствующего в коллекции. */
+export interface ExpansionSummary {
+  gameId: number;
+  name: string;
+  thumbnailUrl: string | null;
+  collectionId: string;
+}
+
+/** Сводка базовой игры дополнения (для ч/б карточки осиротевшего дополнения). */
+export interface BaseSummary {
+  gameId: number;
+  name: string;
+  thumbnailUrl: string | null;
+  imageUrl: string | null;
+  /** Есть ли базовая игра в самой коллекции. */
+  present: boolean;
+}
+
+/** Карта связей дополнений для группировки на главном экране. */
+export interface ExpansionMap {
+  /** baseGameId → дополнения этой базы, присутствующие в коллекции. */
+  byBase: Record<number, ExpansionSummary[]>;
+  /** expansionGameId (в коллекции) → его базовая игра. */
+  expansionToBase: Record<number, BaseSummary>;
+}
+
+const EMPTY_EXPANSION_MAP: ExpansionMap = { byBase: {}, expansionToBase: {} };
+
+/**
+ * Строит карту связей «дополнение↔база» по всей коллекции (одним проходом, без
+ * пагинации — payload лёгкий, только сводки). Клиент по ней группирует карточки:
+ * прячет дополнения, чья база в коллекции, рисует бейдж «+N допов» у базы и ч/б
+ * карточку у осиротевших дополнений.
+ */
+export async function getCollectionExpansionMap(
+  supabase: DB,
+  collectionIds: string[]
+): Promise<ExpansionMap> {
+  if (collectionIds.length === 0) return EMPTY_EXPANSION_MAP;
+
+  // 1) Все игры коллекции (game_id + откуда). В сводном виде один и тот же
+  //    game_id может встретиться в нескольких коллекциях — берём первую.
+  const { data: itemRows, error: itemErr } = await supabase
+    .from("collection_items")
+    .select("collection_id, game_id")
+    .in("collection_id", collectionIds);
+  if (itemErr) throw new Error(itemErr.message);
+
+  const itemSet = new Set<number>();
+  const collectionByGame = new Map<number, string>();
+  for (const r of itemRows ?? []) {
+    itemSet.add(r.game_id);
+    if (!collectionByGame.has(r.game_id)) {
+      collectionByGame.set(r.game_id, r.collection_id);
+    }
+  }
+  if (itemSet.size === 0) return EMPTY_EXPANSION_MAP;
+
+  // 2) Связи expansion, у которых хотя бы одна сторона — игра из коллекции.
+  const ids = [...itemSet];
+  const inList = `(${ids.join(",")})`;
+  const { data: linkRows, error: linkErr } = await supabase
+    .from("game_links")
+    .select("from_game_id, to_game_id")
+    .eq("link_type", "expansion")
+    .or(`from_game_id.in.${inList},to_game_id.in.${inList}`);
+  if (linkErr) throw new Error(linkErr.message);
+  if (!linkRows || linkRows.length === 0) return EMPTY_EXPANSION_MAP;
+
+  // 3) Сводки всех игр, упомянутых в связях (для названий/обложек баз).
+  const refIds = new Set<number>();
+  for (const l of linkRows) {
+    refIds.add(l.from_game_id);
+    refIds.add(l.to_game_id);
+  }
+  const { data: gameRows, error: gameErr } = await supabase
+    .from("games")
+    .select("id, name, thumbnail_url, image_url")
+    .in("id", [...refIds]);
+  if (gameErr) throw new Error(gameErr.message);
+  const gameById = new Map(
+    (gameRows ?? []).map((g) => [g.id, g] as const)
+  );
+
+  const byBase: Record<number, ExpansionSummary[]> = {};
+  const expansionToBase: Record<number, BaseSummary> = {};
+  for (const { from_game_id: expId, to_game_id: baseId } of linkRows) {
+    const expInCollection = itemSet.has(expId);
+    const baseInCollection = itemSet.has(baseId);
+
+    // Дополнение в коллекции → знаем его базу (для ч/б карточки и страницы игры)
+    // и группируем под базой. byBase ведём и для отсутствующих в коллекции баз
+    // (осиротевшие дополнения) — карточка-сирота тоже показывает свой список.
+    if (expInCollection) {
+      const base = gameById.get(baseId);
+      if (base) {
+        expansionToBase[expId] = {
+          gameId: baseId,
+          name: base.name,
+          thumbnailUrl: base.thumbnail_url,
+          imageUrl: base.image_url,
+          present: baseInCollection,
+        };
+      }
+      const exp = gameById.get(expId);
+      if (exp) {
+        (byBase[baseId] ??= []).push({
+          gameId: expId,
+          name: exp.name,
+          thumbnailUrl: exp.thumbnail_url,
+          collectionId: collectionByGame.get(expId) ?? collectionIds[0],
+        });
+      }
+    }
+  }
+
+  return { byBase, expansionToBase };
+}
+
 /** Игры из коллекций самого пользователя (сводный вид «Все игры»).
  *  Берём только коллекции, в которых пользователь состоит (как и список вкладок),
  *  иначе RLS отдал бы ещё и чужие публичные коллекции и коллекции друзей.
@@ -414,13 +585,7 @@ export async function listAllGames(
   userId: string,
   opts: ListOptions = {}
 ): Promise<Page<CollectionGame>> {
-  const { data: memberships, error: memErr } = await supabase
-    .from("collection_members")
-    .select("collection_id")
-    .eq("user_id", userId);
-  if (memErr) throw new Error(memErr.message);
-
-  const ids = (memberships ?? []).map((m) => m.collection_id);
+  const ids = await getMemberCollectionIds(supabase, userId);
   if (ids.length === 0) return { items: [], nextCursor: null };
 
   const limit = clampLimit(opts.limit);

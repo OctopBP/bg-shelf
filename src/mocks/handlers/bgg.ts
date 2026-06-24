@@ -51,6 +51,16 @@ function thingItemXml(g: MockGame): string {
       (e) =>
         `<link type="boardgameexpansion" id="${e.bggId}" value="${xmlEscape(e.name)}"/>`
     ),
+    // Если g — дополнение, выводим inbound-ссылки на базовые игры (как BGG на
+    // странице дополнения): база — это та, у которой g числится в expansions.
+    ...(g.isExpansion
+      ? MOCK_GAMES.filter((b) =>
+          (b.expansions ?? []).some((e) => e.bggId === g.bggId)
+        ).map(
+          (b) =>
+            `<link type="boardgameexpansion" id="${b.bggId}" inbound="true" value="${xmlEscape(b.name)}"/>`
+        )
+      : []),
   ].join("");
 
   return (

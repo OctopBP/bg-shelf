@@ -12,11 +12,12 @@ import {
   IconLoader2,
   IconPencil,
   IconPlus,
+  IconPuzzle,
   IconStarFilled,
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import type { CollectionGame } from "@/lib/collection";
+import type { CollectionGame, ExpansionSummary } from "@/lib/collection";
 import { colorForKey } from "@/lib/palette";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -43,9 +44,12 @@ function toForm(game: CollectionGame): EditableInfo {
 export default function GameDetail({
   game,
   canEdit,
+  expansions = [],
 }: {
   game: CollectionGame;
   canEdit: boolean;
+  /** Дополнения этой игры, присутствующие в коллекции. */
+  expansions?: ExpansionSummary[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -461,6 +465,42 @@ export default function GameDetail({
           )}
         </div>
       </div>
+
+      {/* Дополнения в коллекции */}
+      {expansions.length > 0 && (
+        <div className="surface space-y-3 px-5 py-5 sm:px-7 sm:py-6">
+          <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-ink/55">
+            Дополнения в коллекции · {expansions.length}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {expansions.map((exp) => (
+              <Link
+                key={exp.gameId}
+                href={`/game/${exp.gameId}?c=${exp.collectionId}`}
+                className="flex items-center gap-3 rounded-2xl border-2 border-ink bg-brand-soft/40 p-2 transition hover:bg-brand-soft"
+              >
+                <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border-2 border-ink bg-brand-soft">
+                  {exp.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={exp.thumbnailUrl}
+                      alt={exp.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-ink/30">
+                      <IconPuzzle size={22} />
+                    </span>
+                  )}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink">
+                  {exp.name}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {confirmingRemove && (
         <ConfirmDialog

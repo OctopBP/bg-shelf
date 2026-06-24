@@ -674,6 +674,7 @@ export type Database = {
           p_categories?: string[]
           p_description?: string
           p_image_url?: string
+          p_is_expansion?: boolean
           p_max_players?: number
           p_mechanics?: string[]
           p_min_players?: number
@@ -752,6 +753,10 @@ export type Database = {
       }
       is_friend_collection: { Args: { cid: string }; Returns: boolean }
       is_public_collection: { Args: { cid: string }; Returns: boolean }
+      link_expansion: {
+        Args: { p_from_game_id: number; p_to_game_id: number }
+        Returns: undefined
+      }
       search_games: {
         Args: { lim?: number; q: string }
         Returns: {

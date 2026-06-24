@@ -41,6 +41,11 @@ export interface BggGameDetails {
   mechanics: string[];
   /** Дополнения к этой игре (по ссылкам boardgameexpansion в BGG) */
   expansions: BggExpansion[];
+  /** true — сама эта запись является дополнением (есть inbound-ссылка на базу). */
+  isExpansion: boolean;
+  /** Базовые игры, к которым это дополнение (inbound boardgameexpansion-ссылки).
+   *  У базовой игры пустой. */
+  baseGames: BggExpansion[];
 }
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -216,6 +221,16 @@ export async function getBggGameDetails(
     .map((l) => ({ bggId: Number(l["@_id"]), name: l["@_value"] }))
     .filter((e) => !Number.isNaN(e.bggId) && !!e.name);
 
+  // Базовые игры: inbound boardgameexpansion-ссылки (стоят на странице самого
+  // дополнения и ведут на базу). Их наличие и есть признак того, что эта запись —
+  // дополнение.
+  const baseGames: BggExpansion[] = links
+    .filter(
+      (l) => l["@_type"] === "boardgameexpansion" && l["@_inbound"] === "true"
+    )
+    .map((l) => ({ bggId: Number(l["@_id"]), name: l["@_value"] }))
+    .filter((e) => !Number.isNaN(e.bggId) && !!e.name);
+
   const stats = item.statistics as
     | { ratings?: Record<string, unknown> }
     | undefined;
@@ -245,6 +260,8 @@ export async function getBggGameDetails(
     categories: linkValues("boardgamecategory"),
     mechanics: linkValues("boardgamemechanic"),
     expansions,
+    isExpansion: baseGames.length > 0,
+    baseGames,
   };
 }
 

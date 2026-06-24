@@ -5,6 +5,7 @@
 // The real @supabase/ssr clients run unchanged; only the network is faked.
 import { http, HttpResponse } from "msw";
 import { DEMO_USER } from "@/lib/mock/config";
+import { MOCK_GAMES } from "@/lib/bgg.mock";
 import {
   upsertGame,
   searchGames,
@@ -157,6 +158,18 @@ const restHandlers = [
         if (wantsObject(request)) {
           return rows.length === 1 ? HttpResponse.json(rows[0]) : PGRST116;
         }
+        return HttpResponse.json(rows);
+      }
+      // Карта дополнений: {collection_id, game_id} по списку коллекций
+      // (getCollectionExpansionMap).
+      if (select.includes("game_id")) {
+        const scope = inList ?? (collectionId ? [collectionId] : []);
+        const rows = scope.flatMap((id) =>
+          selectItems(id).map((r) => ({
+            collection_id: r.collection_id,
+            game_id: r.game_id,
+          }))
+        );
         return HttpResponse.json(rows);
       }
       // Счётчики игр для коллекций друга (?collection_id=in.(…)).
@@ -486,10 +499,11 @@ const restHandlers = [
   }),
 
   // games: выборка по списку bgg_id (?bgg_id=in.(…)) — обложки дополнений в окне
-  // добавления (getLocalThumbnails). Без фильтра ничего не отдаём.
+  // добавления (getLocalThumbnails) — или по нашему id (?id=in.(…)) — сводки баз
+  // для карты дополнений. В моке id === bgg_id. Без фильтра ничего не отдаём.
   http.get("*/rest/v1/games", ({ request }) => {
     const url = new URL(request.url);
-    const raw = url.searchParams.get("bgg_id");
+    const raw = url.searchParams.get("id") ?? url.searchParams.get("bgg_id");
     const ids = raw?.startsWith("in.(")
       ? raw
           .slice(4, -1)
@@ -498,6 +512,30 @@ const restHandlers = [
           .filter((n) => !Number.isNaN(n))
       : [];
     return HttpResponse.json(ids.length ? gamesByIds(ids) : []);
+  }),
+
+  // game_links: связи дополнение→база. В моке выводим из MOCK_GAMES.expansions
+  // (from = дополнение, to = базовая игра); фильтруем по id из запроса (?or=…).
+  http.get("*/rest/v1/game_links", ({ request }) => {
+    const url = new URL(request.url);
+    const wanted = new Set(
+      [...(url.searchParams.get("or") ?? "").matchAll(/\d+/g)].map((m) =>
+        Number(m[0])
+      )
+    );
+    const links: { from_game_id: number; to_game_id: number }[] = [];
+    for (const base of MOCK_GAMES) {
+      for (const exp of base.expansions ?? []) {
+        links.push({ from_game_id: exp.bggId, to_game_id: base.bggId });
+      }
+    }
+    const filtered =
+      wanted.size === 0
+        ? links
+        : links.filter(
+            (l) => wanted.has(l.from_game_id) || wanted.has(l.to_game_id)
+          );
+    return HttpResponse.json(filtered);
   }),
 
   // upsert games cache (one object or an array)
@@ -528,12 +566,16 @@ const restHandlers = [
       description: (p.p_description as string | undefined) ?? null,
       categories: (p.p_categories as string[] | undefined) ?? [],
       mechanics: (p.p_mechanics as string[] | undefined) ?? [],
-      is_expansion: false,
+      is_expansion: (p.p_is_expansion as boolean | undefined) ?? false,
       updated_at: new Date().toISOString(),
     };
     upsertGame(record);
     return HttpResponse.json(record);
   }),
+
+  // RPC: link_expansion — в реальной БД пишет game_links; в моке связи выводятся
+  // из MOCK_GAMES.expansions, поэтому здесь просто принимаем вызов.
+  http.post("*/rest/v1/rpc/link_expansion", () => HttpResponse.json(null)),
 
   // patch games cache (manual edits to shared game info)
   http.patch("*/rest/v1/games", async ({ request }) => {

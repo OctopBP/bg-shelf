@@ -10,6 +10,8 @@ import {
   updateGameInfo,
   listCollection,
   listAllGames,
+  getCollectionExpansionMap,
+  getMemberCollectionIds,
   type GameInfoUpdate,
 } from "@/lib/collection";
 
@@ -81,20 +83,21 @@ export async function GET(request: NextRequest) {
 
   try {
     if (all) {
-      const { items, nextCursor } = await listAllGames(supabase, user.id, {
-        cursor,
-        limit,
-      });
-      return NextResponse.json({ games: items, nextCursor });
+      const ids = await getMemberCollectionIds(supabase, user.id);
+      const [{ items, nextCursor }, expansionMap] = await Promise.all([
+        listAllGames(supabase, user.id, { cursor, limit }),
+        getCollectionExpansionMap(supabase, ids),
+      ]);
+      return NextResponse.json({ games: items, nextCursor, expansionMap });
     }
     if (!collectionId) {
       return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
     }
-    const { items, nextCursor } = await listCollection(supabase, collectionId, {
-      cursor,
-      limit,
-    });
-    return NextResponse.json({ games: items, nextCursor });
+    const [{ items, nextCursor }, expansionMap] = await Promise.all([
+      listCollection(supabase, collectionId, { cursor, limit }),
+      getCollectionExpansionMap(supabase, [collectionId]),
+    ]);
+    return NextResponse.json({ games: items, nextCursor, expansionMap });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Неизвестная ошибка";
     return NextResponse.json({ error: message }, { status: 500 });

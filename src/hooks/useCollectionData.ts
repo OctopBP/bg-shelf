@@ -18,8 +18,34 @@ export interface CollectionGame {
   maxPlayers: number | null;
   playingTime: number | null;
   rating: number | null;
+  isExpansion: boolean;
   tags: string[];
 }
+
+/** Сводка дополнения, присутствующего в коллекции (зеркалит lib/collection). */
+export interface ExpansionSummary {
+  gameId: number;
+  name: string;
+  thumbnailUrl: string | null;
+  collectionId: string;
+}
+
+/** Сводка базовой игры дополнения. */
+export interface BaseSummary {
+  gameId: number;
+  name: string;
+  thumbnailUrl: string | null;
+  imageUrl: string | null;
+  present: boolean;
+}
+
+/** Карта связей дополнений активного вида. */
+export interface ExpansionMap {
+  byBase: Record<number, ExpansionSummary[]>;
+  expansionToBase: Record<number, BaseSummary>;
+}
+
+const EMPTY_EXPANSION_MAP: ExpansionMap = { byBase: {}, expansionToBase: {} };
 
 /** Сводный вид «Все игры». */
 export const ALL = "all";
@@ -36,6 +62,8 @@ export function useCollectionData() {
   const [activeId, setActiveId] = useState<string>(ALL);
 
   const [games, setGames] = useState<CollectionGame[]>([]);
+  const [expansionMap, setExpansionMap] =
+    useState<ExpansionMap>(EMPTY_EXPANSION_MAP);
   const [loaded, setLoaded] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -76,9 +104,12 @@ export function useCollectionData() {
   const loadGames = useCallback(async () => {
     setLoaded(false);
     const res = await fetch(gamesUrl());
-    const data = res.ok ? await res.json() : { games: [], nextCursor: null };
+    const data = res.ok
+      ? await res.json()
+      : { games: [], nextCursor: null, expansionMap: EMPTY_EXPANSION_MAP };
     setGames((data.games as CollectionGame[]) ?? []);
     setNextCursor((data.nextCursor as string | null) ?? null);
+    setExpansionMap((data.expansionMap as ExpansionMap) ?? EMPTY_EXPANSION_MAP);
     setLoaded(true);
   }, [gamesUrl]);
 
@@ -132,6 +163,7 @@ export function useCollectionData() {
     isAllView,
     loadCollections,
     games,
+    expansionMap,
     loaded,
     nextCursor,
     loadingMore,
