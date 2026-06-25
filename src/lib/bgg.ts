@@ -41,6 +41,10 @@ export interface BggGameDetails {
   mechanics: string[];
   /** Дополнения к этой игре (по ссылкам boardgameexpansion в BGG) */
   expansions: BggExpansion[];
+  /** Аксессуары к этой игре (outbound boardgameaccessory). */
+  accessories: BggExpansion[];
+  /** Связанные игры/переиздания (boardgameimplementation, обе стороны). */
+  relatedGames: BggExpansion[];
   /** true — сама эта запись является дополнением (есть inbound-ссылка на базу). */
   isExpansion: boolean;
   /** Базовые игры, к которым это дополнение (inbound boardgameexpansion-ссылки).
@@ -212,24 +216,29 @@ export async function getBggGameDetails(
   const linkValues = (type: string) =>
     links.filter((l) => l["@_type"] === type).map((l) => l["@_value"]);
 
-  // Дополнения: outbound-ссылки boardgameexpansion (на странице базовой игры у
-  // них нет inbound="true" — он стоит на обратной ссылке со страницы дополнения).
-  const expansions: BggExpansion[] = links
-    .filter(
-      (l) => l["@_type"] === "boardgameexpansion" && l["@_inbound"] !== "true"
-    )
-    .map((l) => ({ bggId: Number(l["@_id"]), name: l["@_value"] }))
-    .filter((e) => !Number.isNaN(e.bggId) && !!e.name);
+  // Связанные игры по ссылкам заданного типа. dir: 'out' — только outbound
+  // (ссылки со страницы этой игры на её дополнения/аксессуары), 'in' — только
+  // inbound (на базу), 'any' — обе стороны (для implementation-связей).
+  const linkGames = (type: string, dir: "out" | "in" | "any"): BggExpansion[] =>
+    links
+      .filter((l) => {
+        if (l["@_type"] !== type) return false;
+        const inbound = l["@_inbound"] === "true";
+        return dir === "any" || (dir === "in" ? inbound : !inbound);
+      })
+      .map((l) => ({ bggId: Number(l["@_id"]), name: l["@_value"] }))
+      .filter((e) => !Number.isNaN(e.bggId) && !!e.name);
 
-  // Базовые игры: inbound boardgameexpansion-ссылки (стоят на странице самого
-  // дополнения и ведут на базу). Их наличие и есть признак того, что эта запись —
-  // дополнение.
-  const baseGames: BggExpansion[] = links
-    .filter(
-      (l) => l["@_type"] === "boardgameexpansion" && l["@_inbound"] === "true"
-    )
-    .map((l) => ({ bggId: Number(l["@_id"]), name: l["@_value"] }))
-    .filter((e) => !Number.isNaN(e.bggId) && !!e.name);
+  // Дополнения: outbound boardgameexpansion (на странице базовой игры у них нет
+  // inbound="true" — он стоит на обратной ссылке со страницы дополнения).
+  const expansions = linkGames("boardgameexpansion", "out");
+  // Аксессуары: outbound boardgameaccessory (аксессуары именно этой игры).
+  const accessories = linkGames("boardgameaccessory", "out");
+  // Связанные игры/переиздания: boardgameimplementation в обе стороны.
+  const relatedGames = linkGames("boardgameimplementation", "any");
+  // Базовые игры: inbound boardgameexpansion-ссылки (ведут на базу). Их наличие
+  // и есть признак того, что эта запись — дополнение.
+  const baseGames = linkGames("boardgameexpansion", "in");
 
   const stats = item.statistics as
     | { ratings?: Record<string, unknown> }
@@ -260,6 +269,8 @@ export async function getBggGameDetails(
     categories: linkValues("boardgamecategory"),
     mechanics: linkValues("boardgamemechanic"),
     expansions,
+    accessories,
+    relatedGames,
     isExpansion: baseGames.length > 0,
     baseGames,
   };

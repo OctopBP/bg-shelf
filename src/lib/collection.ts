@@ -145,8 +145,8 @@ async function linkExpansionBases(
       if (!baseDetails) continue;
       const baseGameId = await cacheGameFromDetails(supabase, baseDetails);
       const { error } = await supabase.rpc("link_expansion", {
-        p_from_game_id: expansionGameId,
-        p_to_game_id: baseGameId,
+        p_addon_game_id: expansionGameId,
+        p_base_game_id: baseGameId,
       });
       if (error) log.error(`link_expansion ${expansionGameId}→${baseGameId}:`, error.message);
     } catch (e) {
@@ -520,17 +520,17 @@ export async function getCollectionExpansionMap(
   const inList = `(${ids.join(",")})`;
   const { data: linkRows, error: linkErr } = await supabase
     .from("game_links")
-    .select("from_game_id, to_game_id")
+    .select("addon_game_id, base_game_id")
     .eq("link_type", "expansion")
-    .or(`from_game_id.in.${inList},to_game_id.in.${inList}`);
+    .or(`addon_game_id.in.${inList},base_game_id.in.${inList}`);
   if (linkErr) throw new Error(linkErr.message);
   if (!linkRows || linkRows.length === 0) return EMPTY_EXPANSION_MAP;
 
   // 3) Сводки всех игр, упомянутых в связях (для названий/обложек баз).
   const refIds = new Set<number>();
   for (const l of linkRows) {
-    refIds.add(l.from_game_id);
-    refIds.add(l.to_game_id);
+    refIds.add(l.addon_game_id);
+    refIds.add(l.base_game_id);
   }
   const { data: gameRows, error: gameErr } = await supabase
     .from("games")
@@ -543,7 +543,7 @@ export async function getCollectionExpansionMap(
 
   const byBase: Record<number, ExpansionSummary[]> = {};
   const expansionToBase: Record<number, BaseSummary> = {};
-  for (const { from_game_id: expId, to_game_id: baseId } of linkRows) {
+  for (const { addon_game_id: expId, base_game_id: baseId } of linkRows) {
     const expInCollection = itemSet.has(expId);
     const baseInCollection = itemSet.has(baseId);
 

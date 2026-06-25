@@ -289,31 +289,31 @@ export type Database = {
       }
       game_links: {
         Row: {
-          from_game_id: number
+          addon_game_id: number
+          base_game_id: number
           link_type: string
-          to_game_id: number
         }
         Insert: {
-          from_game_id: number
+          addon_game_id: number
+          base_game_id: number
           link_type: string
-          to_game_id: number
         }
         Update: {
-          from_game_id?: number
+          addon_game_id?: number
+          base_game_id?: number
           link_type?: string
-          to_game_id?: number
         }
         Relationships: [
           {
-            foreignKeyName: "game_links_from_game_id_fkey"
-            columns: ["from_game_id"]
+            foreignKeyName: "game_links_addon_game_id_fkey"
+            columns: ["addon_game_id"]
             isOneToOne: false
             referencedRelation: "games"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "game_links_to_game_id_fkey"
-            columns: ["to_game_id"]
+            foreignKeyName: "game_links_base_game_id_fkey"
+            columns: ["base_game_id"]
             isOneToOne: false
             referencedRelation: "games"
             referencedColumns: ["id"]
@@ -754,7 +754,7 @@ export type Database = {
       is_friend_collection: { Args: { cid: string }; Returns: boolean }
       is_public_collection: { Args: { cid: string }; Returns: boolean }
       link_expansion: {
-        Args: { p_from_game_id: number; p_to_game_id: number }
+        Args: { p_addon_game_id: number; p_base_game_id: number }
         Returns: undefined
       }
       search_games: {

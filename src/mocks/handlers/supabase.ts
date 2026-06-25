@@ -515,7 +515,7 @@ const restHandlers = [
   }),
 
   // game_links: связи дополнение→база. В моке выводим из MOCK_GAMES.expansions
-  // (from = дополнение, to = базовая игра); фильтруем по id из запроса (?or=…).
+  // (addon = дополнение, base = базовая игра); фильтруем по id из запроса (?or=…).
   http.get("*/rest/v1/game_links", ({ request }) => {
     const url = new URL(request.url);
     const wanted = new Set(
@@ -523,17 +523,17 @@ const restHandlers = [
         Number(m[0])
       )
     );
-    const links: { from_game_id: number; to_game_id: number }[] = [];
+    const links: { addon_game_id: number; base_game_id: number }[] = [];
     for (const base of MOCK_GAMES) {
       for (const exp of base.expansions ?? []) {
-        links.push({ from_game_id: exp.bggId, to_game_id: base.bggId });
+        links.push({ addon_game_id: exp.bggId, base_game_id: base.bggId });
       }
     }
     const filtered =
       wanted.size === 0
         ? links
         : links.filter(
-            (l) => wanted.has(l.from_game_id) || wanted.has(l.to_game_id)
+            (l) => wanted.has(l.addon_game_id) || wanted.has(l.base_game_id)
           );
     return HttpResponse.json(filtered);
   }),

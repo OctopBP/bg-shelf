@@ -11,7 +11,12 @@ import type { BggGameDetails } from "./bgg";
 export interface MockGame
   extends Omit<
     BggGameDetails,
-    "originalName" | "expansions" | "isExpansion" | "baseGames"
+    | "originalName"
+    | "expansions"
+    | "accessories"
+    | "relatedGames"
+    | "isExpansion"
+    | "baseGames"
   > {
   /** Подстроки для распознавания игры в запросе/команде (нижний регистр) */
   aliases: string[];
