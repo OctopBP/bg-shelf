@@ -267,7 +267,7 @@ export function browseGames(
       const hay = `${g.name} ${g.original_name ?? ""}`.toLowerCase();
       return hay.includes(needle);
     })
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1) || a.name.localeCompare(b.name))
     .map((g) => ({ ...g, in_collection: inCollection.has(g.id) }));
   return {
     items: all.slice(offset, offset + limit),
