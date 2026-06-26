@@ -541,34 +541,63 @@ export async function getCollectionExpansionMap(
     (gameRows ?? []).map((g) => [g.id, g] as const)
   );
 
+  // BGG иногда привязывает одно дополнение сразу к нескольким «базам» (см.
+  // docs/expansions-investigation.md, дефект #3) — собираем все базы каждого
+  // владеемого дополнения, чтобы решить, как его группировать, одним проходом.
+  const basesByExp = new Map<number, Set<number>>();
+  for (const { addon_game_id: expId, base_game_id: baseId } of linkRows) {
+    if (!itemSet.has(expId)) continue;
+    (basesByExp.get(expId) ?? basesByExp.set(expId, new Set()).get(expId)!).add(
+      baseId
+    );
+  }
+
   const byBase: Record<number, ExpansionSummary[]> = {};
   const expansionToBase: Record<number, BaseSummary> = {};
-  for (const { addon_game_id: expId, base_game_id: baseId } of linkRows) {
-    const expInCollection = itemSet.has(expId);
-    const baseInCollection = itemSet.has(baseId);
+  for (const [expId, baseIdSet] of basesByExp) {
+    const exp = gameById.get(expId);
+    if (!exp) continue;
+    const expSummary: ExpansionSummary = {
+      gameId: expId,
+      name: exp.name,
+      thumbnailUrl: exp.thumbnail_url,
+      collectionId: collectionByGame.get(expId) ?? collectionIds[0],
+    };
 
-    // Дополнение в коллекции → знаем его базу (для ч/б карточки и страницы игры)
-    // и группируем под базой. byBase ведём и для отсутствующих в коллекции баз
-    // (осиротевшие дополнения) — карточка-сирота тоже показывает свой список.
-    if (expInCollection) {
-      const base = gameById.get(baseId);
+    const baseIds = [...baseIdSet];
+    const ownedBaseIds = baseIds.filter((id) => itemSet.has(id));
+
+    if (ownedBaseIds.length > 0) {
+      // Все владеемые базы получают бейдж «+N допов»; дополнение скрывается
+      // из общей сетки (present: true), под какой именно базой его искать —
+      // не важно для текущей логики скрытия.
+      for (const baseId of ownedBaseIds) {
+        (byBase[baseId] ??= []).push(expSummary);
+      }
+      const base = gameById.get(ownedBaseIds[0]);
       if (base) {
         expansionToBase[expId] = {
-          gameId: baseId,
+          gameId: base.id,
           name: base.name,
           thumbnailUrl: base.thumbnail_url,
           imageUrl: base.image_url,
-          present: baseInCollection,
+          present: true,
         };
       }
-      const exp = gameById.get(expId);
-      if (exp) {
-        (byBase[baseId] ??= []).push({
-          gameId: expId,
-          name: exp.name,
-          thumbnailUrl: exp.thumbnail_url,
-          collectionId: collectionByGame.get(expId) ?? collectionIds[0],
-        });
+    } else {
+      // Ни одна база не в коллекции — показываем одну «сиротскую» карточку:
+      // базу с наименьшим id, а не по одной на каждого кандидата.
+      const chosenBaseId = Math.min(...baseIds);
+      const base = gameById.get(chosenBaseId);
+      if (base) {
+        expansionToBase[expId] = {
+          gameId: chosenBaseId,
+          name: base.name,
+          thumbnailUrl: base.thumbnail_url,
+          imageUrl: base.image_url,
+          present: false,
+        };
+        (byBase[chosenBaseId] ??= []).push(expSummary);
       }
     }
   }
