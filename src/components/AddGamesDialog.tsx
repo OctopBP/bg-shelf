@@ -198,7 +198,7 @@ export default function AddGamesDialog({
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
-        className="surface animate-pop-in max-h-[85vh] w-full max-w-2xl overflow-y-auto p-6"
+        className="surface animate-pop-in max-h-[85vh] w-full max-w-2xl overflow-y-auto overscroll-contain p-6"
       >
         <div className="mb-4 flex items-start justify-between gap-3">
           <h2 className="font-display text-lg font-extrabold tracking-tight text-ink">

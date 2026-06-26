@@ -246,6 +246,35 @@ export function searchGames(q: string, limit = 4): GameRecord[] {
   return out;
 }
 
+/** Демо-аналог RPC browse_games: постраничный обзор каталога с substring-поиском
+ *  и пометкой уже добавленных в указанную коллекцию игр. */
+export function browseGames(
+  query: string | null,
+  collectionId: string | null,
+  limit: number,
+  offset: number
+): { items: (GameRecord & { in_collection: boolean })[]; total: number } {
+  seed();
+  const needle = (query ?? "").trim().toLowerCase();
+  const inCollection = new Set(
+    collectionId
+      ? items.filter((i) => i.collection_id === collectionId).map((i) => i.game_id)
+      : []
+  );
+  const all = [...games.values()]
+    .filter((g) => {
+      if (!needle) return true;
+      const hay = `${g.name} ${g.original_name ?? ""}`.toLowerCase();
+      return hay.includes(needle);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((g) => ({ ...g, in_collection: inCollection.has(g.id) }));
+  return {
+    items: all.slice(offset, offset + limit),
+    total: all.length,
+  };
+}
+
 /** Игры кэша по списку bgg_id — демо-аналог `select … from games where bgg_id in (…)`
  *  (используется для обложек дополнений в окне добавления). */
 export function gamesByIds(ids: number[]): GameRecord[] {

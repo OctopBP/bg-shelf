@@ -9,6 +9,7 @@ import { MOCK_GAMES } from "@/lib/bgg.mock";
 import {
   upsertGame,
   searchGames,
+  browseGames,
   gamesByIds,
   upsertItem,
   deleteItem,
@@ -329,6 +330,33 @@ const restHandlers = [
       lim?: number;
     };
     return HttpResponse.json(searchGames(body.q ?? "", body.lim ?? 4));
+  }),
+
+  // RPC: постраничный обзор каталога (режим «Умный поиск выключен»)
+  http.post("*/rest/v1/rpc/browse_games", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      p_query?: string | null;
+      p_collection_id?: string | null;
+      p_limit?: number;
+      p_offset?: number;
+    };
+    const { items, total } = browseGames(
+      body.p_query ?? null,
+      body.p_collection_id ?? null,
+      body.p_limit ?? 20,
+      body.p_offset ?? 0
+    );
+    return HttpResponse.json(
+      items.map((g) => ({
+        id: g.id,
+        bgg_id: g.bgg_id,
+        name: g.name,
+        year_published: g.year_published,
+        thumbnail_url: g.thumbnail_url,
+        in_collection: g.in_collection,
+        total_count: total,
+      }))
+    );
   }),
 
   http.post("*/rest/v1/rpc/create_collection", async ({ request }) => {

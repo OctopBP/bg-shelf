@@ -20,6 +20,8 @@ import CreateCollectionDialog from "./CreateCollectionDialog";
 import ConfirmDialog from "./ConfirmDialog";
 import MoveGameDialog from "./MoveGameDialog";
 import AddGamesDialog, { type ResolvedGame } from "./AddGamesDialog";
+import { GameBrowser } from "./add-games";
+import { Switch } from "./ui";
 import { CollectionTabs, FilterBar, GameGrid } from "./collection";
 import type { GridNode, QuickFilter } from "./collection";
 import type { CollectionRole, CollectionVisibility } from "@/lib/collections";
@@ -39,6 +41,16 @@ const VISIBILITY_OPTIONS: {
   { value: "friends", label: "Только друзьям", Icon: IconUsers },
   { value: "private", label: "Только мне", Icon: IconLock },
 ];
+
+/** Баннер статуса операций (команды, добавление, фото и т.п.). */
+function StatusBanner({ status }: { status: string }) {
+  return (
+    <div className="surface animate-pop-in flex items-start gap-2 px-4 py-3 text-sm font-medium text-ink">
+      <IconMessage2 size={18} className="mt-0.5 shrink-0 text-brand" />
+      <span className="whitespace-pre-wrap">{status}</span>
+    </div>
+  );
+}
 
 const supports = (g: CollectionGame, n: number) =>
   g.minPlayers != null &&
@@ -85,6 +97,7 @@ export default function CollectionApp() {
   const [quickFilter, setQuickFilter] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addingGames, setAddingGames] = useState(false);
+  const [smartSearch, setSmartSearch] = useState(false);
   const [creating, setCreating] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [moving, setMoving] = useState<CollectionGame | null>(null);
@@ -402,12 +415,9 @@ export default function CollectionApp() {
         </div>
       )}
 
-      {status && (
-        <div className="surface animate-pop-in flex items-start gap-2 px-4 py-3 text-sm font-medium text-ink">
-          <IconMessage2 size={18} className="mt-0.5 shrink-0 text-brand" />
-          <span className="whitespace-pre-wrap">{status}</span>
-        </div>
-      )}
+      {/* Пока открыто окно добавления, статус показываем внутри него (ниже),
+          а не здесь — иначе баннер прячется за модалкой. */}
+      {status && !addingGames && <StatusBanner status={status} />}
 
       {/* Быстрые фильтры и фильтр по тегам */}
       <FilterBar
@@ -491,53 +501,77 @@ export default function CollectionApp() {
       />
 
       {addingGames && canRunCommands && (
-        <Modal title="Добавить игры" onClose={() => setAddingGames(false)}>
-          <div className="space-y-4">
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                runCommand(command);
-              }}
-            >
-              <input
-                autoFocus
-                type="text"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                disabled={busy}
-                placeholder="Например: «добавь Каркассон и Манчкин, пометь Манчкин как пати»"
-                className="field control-h flex-1 rounded-full px-5 text-sm disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={busy || !command.trim()}
-                aria-label="Выполнить команду"
-                className="btn btn-brand control-h shrink-0 px-5"
-              >
-                {busy ? (
-                  <IconLoader2 size={22} className="animate-spin" />
-                ) : (
-                  <IconArrowRight size={22} stroke={2.5} />
-                )}
-              </button>
-            </form>
-            <div className="flex items-center gap-2">
-              <VoiceInput onTranscript={runCommand} disabled={busy} />
-              <PhotoInput
-                collectionId={commandTarget}
-                onAdded={() => {
-                  setAddingGames(false);
-                  loadGames();
-                  loadCollections(activeId);
+        <Modal
+          title="Добавить игры"
+          size="xl"
+          bodyScroll={smartSearch}
+          onClose={() => setAddingGames(false)}
+          headerExtra={
+            <Switch
+              checked={smartSearch}
+              onChange={setSmartSearch}
+              label="Умный поиск"
+            />
+          }
+        >
+          {status && <StatusBanner status={status} />}
+          {smartSearch ? (
+            <div className="shrink-0 space-y-4 mb-2">
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  runCommand(command);
                 }}
-                onStatus={setStatus}
-              />
-              <span className="text-xs font-medium text-ink/55">
-                Или скажите голосом / загрузите фото полки с играми
-              </span>
+              >
+                <input
+                  autoFocus
+                  type="text"
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  disabled={busy}
+                  placeholder="Например: «добавь Каркассон и Манчкин, пометь Манчкин как пати»"
+                  className="field control-h flex-1 rounded-full px-5 text-sm disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={busy || !command.trim()}
+                  aria-label="Выполнить команду"
+                  className="btn btn-brand control-h shrink-0 px-5"
+                >
+                  {busy ? (
+                    <IconLoader2 size={22} className="animate-spin" />
+                  ) : (
+                    <IconArrowRight size={22} stroke={2.5} />
+                  )}
+                </button>
+              </form>
+              <div className="flex items-center gap-2">
+                <VoiceInput onTranscript={runCommand} disabled={busy} />
+                <PhotoInput
+                  collectionId={commandTarget}
+                  onAdded={() => {
+                    setAddingGames(false);
+                    loadGames();
+                    loadCollections(activeId);
+                  }}
+                  onStatus={setStatus}
+                />
+                <span className="text-xs font-medium text-ink/55">
+                  Или скажите голосом / загрузите фото полки с играми
+                </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <GameBrowser
+              collectionId={commandTarget}
+              onAdded={() => {
+                loadGames();
+                loadCollections(activeId);
+              }}
+              onStatus={setStatus}
+            />
+          )}
         </Modal>
       )}
 

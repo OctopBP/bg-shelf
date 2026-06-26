@@ -745,6 +745,23 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      browse_games: {
+        Args: {
+          p_query?: string | null
+          p_collection_id?: string | null
+          p_limit?: number
+          p_offset?: number
+        }
+        Returns: {
+          id: number
+          bgg_id: number | null
+          name: string
+          year_published: number | null
+          thumbnail_url: string | null
+          in_collection: boolean
+          total_count: number
+        }[]
+      }
       generate_username: { Args: { email: string }; Returns: string }
       is_admin: { Args: { uid: string }; Returns: boolean }
       is_collection_member: {

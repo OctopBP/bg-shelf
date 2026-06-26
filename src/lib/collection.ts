@@ -415,6 +415,55 @@ export async function searchLocalGames(
   return out;
 }
 
+/** Одна строка каталога игр для постраничного обзора (режим простого поиска). */
+export interface BrowseGame {
+  gameId: number;
+  bggId: number | null;
+  name: string;
+  yearPublished: number | null;
+  thumbnailUrl: string | null;
+  inCollection: boolean;
+}
+
+export interface BrowsePage {
+  items: BrowseGame[];
+  total: number;
+}
+
+/**
+ * Постраничный обзор каталога games (RPC `browse_games`) — обычное
+ * substring-совпадение по названию/альт-именам, без fuzzy. Используется
+ * режимом «Умный поиск выключен» в окне добавления игр: пользователь просто
+ * листает каталог и жмёт «+» у нужной игры. `collectionId` — чтобы помечать
+ * уже добавленные в текущую коллекцию игры (in_collection).
+ */
+export async function browseGames(
+  supabase: DB,
+  opts: { query?: string; collectionId?: string; page?: number; pageSize?: number } = {}
+): Promise<BrowsePage> {
+  const pageSize = clampLimit(opts.pageSize ?? 20);
+  const page = Math.max(1, Math.trunc(opts.page ?? 1));
+  const { data, error } = await supabase.rpc("browse_games", {
+    p_query: opts.query?.trim() || null,
+    p_collection_id: opts.collectionId ?? null,
+    p_limit: pageSize,
+    p_offset: (page - 1) * pageSize,
+  });
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  return {
+    items: rows.map((r) => ({
+      gameId: r.id,
+      bggId: r.bgg_id ?? null,
+      name: r.name,
+      yearPublished: r.year_published ?? null,
+      thumbnailUrl: r.thumbnail_url ?? null,
+      inCollection: r.in_collection ?? false,
+    })),
+    total: rows[0]?.total_count ?? 0,
+  };
+}
+
 /**
  * Обложки игр из нашего кэша `games` по bgg_id. Возвращает только то, что уже
  * есть в БД — без обращений к BGG. Используется, чтобы показать превью
