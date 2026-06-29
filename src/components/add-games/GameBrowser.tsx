@@ -132,9 +132,9 @@ export default function GameBrowser({
           rows.map((row) => (
             <div
               key={row.gameId}
-              className="flex items-center gap-3 rounded-2xl border-2 border-ink bg-black/[0.02] p-2.5"
+              className="flex items-center overflow-hidden gap-3 rounded-2xl border-3 border-ink bg-black/[0.02] pr-2.5"
             >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border-2 border-ink bg-brand-soft">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden border-r-3 border-ink bg-brand-soft">
                 {row.thumbnailUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
