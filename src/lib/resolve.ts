@@ -5,6 +5,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { logger } from "./logger";
 import { searchBgg, getBggGameDetails } from "./bgg";
 import { searchLocalGames, getLocalThumbnails } from "./collection";
+import { DEFAULT_LANG } from "./lang";
 
 // Разбор намерения — это классификация + извлечение полей со структурированным
 // выходом (zod). Haiku 4.5 справляется и кратно дешевле/быстрее Opus (P-6).
@@ -139,7 +140,8 @@ export interface ResolvedGame {
 export async function buildProposal(
   games: ParsedAddGame[],
   supabase: SupabaseClient,
-  reqId = "????????"
+  reqId = "????????",
+  lang: string = DEFAULT_LANG
 ): Promise<ResolvedGame[]> {
   const log = (...args: unknown[]) => logger.child(`resolve ${reqId}`).info(...args);
   const out: ResolvedGame[] = [];
@@ -155,7 +157,8 @@ export async function buildProposal(
       const local = await searchLocalGames(
         supabase,
         [g.requestedAs, g.searchQuery],
-        MAX_CANDIDATES
+        MAX_CANDIDATES,
+        lang
       );
       for (const m of local) {
         // Путь добавления пока идёт через BGG (детали тянутся по bggId), поэтому

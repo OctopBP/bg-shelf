@@ -5,12 +5,16 @@
 // The real @supabase/ssr clients run unchanged; only the network is faked.
 import { http, HttpResponse } from "msw";
 import { DEMO_USER } from "@/lib/mock/config";
-import { MOCK_GAMES } from "@/lib/bgg.mock";
 import {
   upsertGame,
   searchGames,
   browseGames,
   gamesByIds,
+  gamesBgg,
+  thumbnailsByBggIds,
+  localizedNames,
+  gameTags,
+  expansionLinks,
   upsertItem,
   deleteItem,
   updateItemFields,
@@ -121,6 +125,17 @@ function eqValue(url: URL, column: string): string | undefined {
   const raw = url.searchParams.get(column);
   if (!raw) return undefined;
   return raw.startsWith("eq.") ? raw.slice(3) : raw;
+}
+
+/** `?game_id=in.(1,2,"3")` → [1, 2, 3]; null/неподходящий формат → []. */
+function inListNums(url: URL, column: string): number[] {
+  const raw = url.searchParams.get(column);
+  if (!raw?.startsWith("in.(")) return [];
+  return raw
+    .slice(4, -1)
+    .split(",")
+    .map((s) => Number(s.replace(/^"|"$/g, "")))
+    .filter((n) => !Number.isNaN(n));
 }
 
 function wantsObject(request: Request): boolean {
@@ -328,8 +343,19 @@ const restHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       q?: string;
       lim?: number;
+      p_lang?: string;
     };
-    return HttpResponse.json(searchGames(body.q ?? "", body.lim ?? 4));
+    // Реальная RPC отдаёт узкую форму (id, bgg_id, name, …) с именем на языке
+    // пользователя; в демо одно (русское) имя — проецируем его.
+    const rows = searchGames(body.q ?? "", body.lim ?? 4).map((g) => ({
+      id: g.id,
+      bgg_id: g.bgg_id,
+      name: g.name,
+      year_published: g.year_published,
+      thumbnail_url: g.thumbnail_url,
+      is_expansion: g.is_expansion,
+    }));
+    return HttpResponse.json(rows);
   }),
 
   // RPC: постраничный обзор каталога (режим «Умный поиск выключен»)
@@ -339,6 +365,7 @@ const restHandlers = [
       p_collection_id?: string | null;
       p_limit?: number;
       p_offset?: number;
+      p_lang?: string;
     };
     const { items, total } = browseGames(
       body.p_query ?? null,
@@ -526,44 +553,55 @@ const restHandlers = [
     return HttpResponse.json(ownerId ? collectionsByOwner(ownerId) : []);
   }),
 
-  // games: выборка по списку bgg_id (?bgg_id=in.(…)) — обложки дополнений в окне
-  // добавления (getLocalThumbnails) — или по нашему id (?id=in.(…)) — сводки баз
-  // для карты дополнений. В моке id === bgg_id. Без фильтра ничего не отдаём.
+  // games: сводки баз/допов по нашему id (?id=in.(…)) для карты дополнений.
+  // В моке id === bgg_id. Без фильтра ничего не отдаём.
   http.get("*/rest/v1/games", ({ request }) => {
     const url = new URL(request.url);
-    const raw = url.searchParams.get("id") ?? url.searchParams.get("bgg_id");
-    const ids = raw?.startsWith("in.(")
-      ? raw
-          .slice(4, -1)
-          .split(",")
-          .map((s) => Number(s.replace(/^"|"$/g, "")))
-          .filter((n) => !Number.isNaN(n))
-      : [];
+    const ids = inListNums(url, "id");
     return HttpResponse.json(ids.length ? gamesByIds(ids) : []);
   }),
 
-  // game_links: связи дополнение→база. В моке выводим из MOCK_GAMES.expansions
-  // (addon = дополнение, base = базовая игра); фильтруем по id из запроса (?or=…).
+  // games_bgg: BGG-деталь по game_id (enrich: bgg_id/описание/оригинал) или
+  // обложки по bgg_id (getLocalThumbnails — превью дополнений).
+  http.get("*/rest/v1/games_bgg", ({ request }) => {
+    const url = new URL(request.url);
+    const byGame = inListNums(url, "game_id");
+    if (byGame.length) return HttpResponse.json(gamesBgg(byGame));
+    const byBgg = inListNums(url, "bgg_id");
+    if (byBgg.length) return HttpResponse.json(thumbnailsByBggIds(byBgg));
+    return HttpResponse.json([]);
+  }),
+
+  // game_bgg_versions: версии (издания). В демо-каталоге их нет → пусто. Для
+  // pickVersionId (.maybeSingle → vnd.pgrst.object) отдаём PGRST116 = null.
+  http.get("*/rest/v1/game_bgg_versions", ({ request }) => {
+    if (wantsObject(request)) return PGRST116;
+    return HttpResponse.json([]);
+  }),
+
+  // game_names: имена на языке пользователя (?game_id=in.(…)&lang=eq.…).
+  http.get("*/rest/v1/game_names", ({ request }) => {
+    const url = new URL(request.url);
+    const ids = inListNums(url, "game_id");
+    const lang = eqValue(url, "lang") ?? "Russian";
+    return HttpResponse.json(ids.length ? localizedNames(ids, lang) : []);
+  }),
+
+  // game_tags: категории/механики игр (?game_id=in.(…)) с embed tags(type,name).
+  http.get("*/rest/v1/game_tags", ({ request }) => {
+    const url = new URL(request.url);
+    const ids = inListNums(url, "game_id");
+    return HttpResponse.json(ids.length ? gameTags(ids) : []);
+  }),
+
+  // game_links: связи в новой форме — game_id = база, target_game_id = дополнение
+  // (link_type='expansion'); фильтруем по id из запроса (?or=…).
   http.get("*/rest/v1/game_links", ({ request }) => {
     const url = new URL(request.url);
-    const wanted = new Set(
-      [...(url.searchParams.get("or") ?? "").matchAll(/\d+/g)].map((m) =>
-        Number(m[0])
-      )
+    const wanted = [...(url.searchParams.get("or") ?? "").matchAll(/\d+/g)].map(
+      (m) => Number(m[0])
     );
-    const links: { addon_game_id: number; base_game_id: number }[] = [];
-    for (const base of MOCK_GAMES) {
-      for (const exp of base.expansions ?? []) {
-        links.push({ addon_game_id: exp.bggId, base_game_id: base.bggId });
-      }
-    }
-    const filtered =
-      wanted.size === 0
-        ? links
-        : links.filter(
-            (l) => wanted.has(l.addon_game_id) || wanted.has(l.base_game_id)
-          );
-    return HttpResponse.json(filtered);
+    return HttpResponse.json(expansionLinks(wanted));
   }),
 
   // upsert games cache (one object or an array)
@@ -601,15 +639,20 @@ const restHandlers = [
     return HttpResponse.json(record);
   }),
 
-  // RPC: link_expansion — в реальной БД пишет game_links; в моке связи выводятся
-  // из MOCK_GAMES.expansions, поэтому здесь просто принимаем вызов.
-  http.post("*/rest/v1/rpc/link_expansion", () => HttpResponse.json(null)),
-
   // patch games cache (manual edits to shared game info)
   http.patch("*/rest/v1/games", async ({ request }) => {
     const url = new URL(request.url);
     const body = (await request.json()) as Partial<GameRecord>;
     updateGame(Number(eqValue(url, "id")), body);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // patch games_bgg: правка описания (после рефактора оно живёт здесь, не в games).
+  // В моке id === game_id, поэтому пишем в тот же GameRecord.
+  http.patch("*/rest/v1/games_bgg", async ({ request }) => {
+    const url = new URL(request.url);
+    const body = (await request.json()) as { description?: string | null };
+    updateGame(Number(eqValue(url, "game_id")), body);
     return new HttpResponse(null, { status: 204 });
   }),
 ];

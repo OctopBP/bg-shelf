@@ -8,6 +8,7 @@ import {
   updateGameTags,
   listCollection,
 } from "./collection";
+import { DEFAULT_LANG } from "./lang";
 
 const MODEL = "claude-opus-4-8";
 
@@ -108,7 +109,8 @@ export async function runCollectionAgent(
   supabase: SupabaseClient,
   collectionId: string,
   userId: string,
-  reqId = "????????"
+  reqId = "????????",
+  lang: string = DEFAULT_LANG
 ): Promise<AgentResult> {
   const l = logger.child(`agent ${reqId}`);
   const log = (...args: unknown[]) => l.info(...args);
@@ -146,7 +148,8 @@ export async function runCollectionAgent(
           collectionId,
           Number(input.bgg_id),
           tags,
-          userId
+          userId,
+          lang
         );
         changed = true;
         return `Игра "${gameName}" добавлена в коллекцию${

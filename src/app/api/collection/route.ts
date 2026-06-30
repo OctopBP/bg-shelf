@@ -12,6 +12,7 @@ import {
   listAllGames,
   getCollectionExpansionMap,
   getMemberCollectionIds,
+  getUserLang,
   type GameInfoUpdate,
 } from "@/lib/collection";
 
@@ -82,11 +83,12 @@ export async function GET(request: NextRequest) {
   const limit = limitParam ? Number(limitParam) : undefined;
 
   try {
+    const lang = await getUserLang(supabase, user.id);
     if (all) {
       const ids = await getMemberCollectionIds(supabase, user.id);
       const [{ items, nextCursor }, expansionMap] = await Promise.all([
-        listAllGames(supabase, user.id, { cursor, limit }),
-        getCollectionExpansionMap(supabase, ids),
+        listAllGames(supabase, user.id, { cursor, limit, lang }),
+        getCollectionExpansionMap(supabase, ids, lang),
       ]);
       return NextResponse.json({ games: items, nextCursor, expansionMap });
     }
@@ -94,8 +96,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Не указана коллекция" }, { status: 400 });
     }
     const [{ items, nextCursor }, expansionMap] = await Promise.all([
-      listCollection(supabase, collectionId, { cursor, limit }),
-      getCollectionExpansionMap(supabase, [collectionId]),
+      listCollection(supabase, collectionId, { cursor, limit, lang }),
+      getCollectionExpansionMap(supabase, [collectionId], lang),
     ]);
     return NextResponse.json({ games: items, nextCursor, expansionMap });
   } catch (e) {
@@ -117,6 +119,7 @@ export async function POST(request: Request) {
   const { data, error: badBody } = await parseBody(PostSchema, request);
   if (badBody) return badBody;
 
+  const lang = await getUserLang(supabase, user.id);
   const added: string[] = [];
   const failed: number[] = [];
   for (const item of data.items) {
@@ -126,7 +129,8 @@ export async function POST(request: Request) {
         data.collectionId,
         item.bggId,
         item.tags ?? [],
-        user.id
+        user.id,
+        lang
       );
       added.push(name);
     } catch {

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { getBggGameDetails, type BggGameDetails } from "./bgg";
 import { logger } from "./logger";
+import { DEFAULT_LANG, langName } from "./lang";
 import {
   clampLimit,
   decodeCursor,
@@ -14,11 +15,18 @@ const log = logger.child("collection");
 type DB = SupabaseClient<Database>;
 type GameRow = Database["public"]["Tables"]["games"]["Row"];
 
-/** Форма строки joined-select (collection_items + games [+ collections]). */
-type CollectionItemRow = Pick<
-  Database["public"]["Tables"]["collection_items"]["Row"],
-  "id" | "collection_id" | "game_id" | "tags" | "notes" | "added_at"
-> & {
+/** Форма строки joined-select (collection_items + games [+ collections]).
+ *  После рефактора каталога 28.06 из `games` ушли bgg_id/description/таксономия —
+ *  их дотягиваем отдельно (games_bgg, game_tags), а локализованное имя и версия
+ *  собираются в enrichRows. */
+type CollectionItemRow = {
+  id: string;
+  collection_id: string;
+  game_id: number;
+  tags: string[] | null;
+  notes: string | null;
+  added_at: string;
+  version_id: number | null;
   games: GameRow | null;
   collections?: { name: string } | null;
 };
@@ -33,8 +41,9 @@ export interface CollectionGame {
   gameId: number;
   /** BGG id, если игра из BGG (для ссылки «открыть на BGG»); иначе null. */
   bggId: number | null;
+  /** Название на языке пользователя (версия/локализованное имя), иначе каноническое. */
   name: string;
-  /** Оригинальное название (обычно английское); null, если совпадает с name */
+  /** Оригинальное (обычно английское) название; null, если совпадает с name. */
   originalName: string | null;
   yearPublished: number | null;
   thumbnailUrl: string | null;
@@ -64,19 +73,153 @@ export interface GameInfoUpdate {
   description?: string | null;
 }
 
-/** Приводит строку joined-select (collection_items + games) к CollectionGame. */
-function mapRow(row: CollectionItemRow): CollectionGame {
+/** Язык пользователя (ISO-код) из профиля; дефолт — русский. */
+export async function getUserLang(supabase: DB, userId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("lang")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) {
+    log.error("getUserLang:", error.message);
+    return DEFAULT_LANG;
+  }
+  return data?.lang || DEFAULT_LANG;
+}
+
+// ---------------------------------------------------------------------------
+// Обогащение строк коллекции данными из сателлитов (BGG-деталь, версия, теги) и
+// локализованным именем. Каталог теперь мультиисточниковый, поэтому имя/описание
+// собираются из нескольких таблиц.
+// ---------------------------------------------------------------------------
+
+type BggExtra = { bgg_id: number | null; description: string | null; primary_name: string };
+
+/** BGG-деталь (bgg_id/описание/оригинальное имя) по нашим game_id. */
+async function fetchGamesBgg(
+  supabase: DB,
+  gameIds: number[]
+): Promise<Map<number, BggExtra>> {
+  const map = new Map<number, BggExtra>();
+  if (gameIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from("games_bgg")
+    .select("game_id, bgg_id, description, primary_name")
+    .in("game_id", gameIds);
+  if (error) {
+    log.error("fetchGamesBgg:", error.message);
+    return map;
+  }
+  for (const r of data ?? []) {
+    map.set(r.game_id, {
+      bgg_id: r.bgg_id,
+      description: r.description,
+      primary_name: r.primary_name,
+    });
+  }
+  return map;
+}
+
+/** Версии (id → название/год) — для записей коллекции с выбранной версией. */
+async function fetchVersions(
+  supabase: DB,
+  versionIds: number[]
+): Promise<Map<number, { canonical_name: string; year_published: number | null }>> {
+  const map = new Map<number, { canonical_name: string; year_published: number | null }>();
+  if (versionIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from("game_bgg_versions")
+    .select("id, canonical_name, year_published")
+    .in("id", versionIds);
+  if (error) {
+    log.error("fetchVersions:", error.message);
+    return map;
+  }
+  for (const r of data ?? []) {
+    map.set(r.id, { canonical_name: r.canonical_name, year_published: r.year_published });
+  }
+  return map;
+}
+
+/** Локализованные имена (game_id → имя на нужном языке). Берём display-имя на
+ *  этом языке, иначе любое имя этого языка; чего нет — нет в карте. */
+export async function fetchLocalizedNames(
+  supabase: DB,
+  gameIds: number[],
+  language: string
+): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  if (gameIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from("game_names")
+    .select("game_id, name, is_display")
+    .in("game_id", gameIds)
+    .eq("lang", language)
+    .order("is_display", { ascending: false });
+  if (error) {
+    log.error("fetchLocalizedNames:", error.message);
+    return map;
+  }
+  for (const r of data ?? []) {
+    if (!map.has(r.game_id)) map.set(r.game_id, r.name); // первое — display (сорт desc)
+  }
+  return map;
+}
+
+/** Категории/механики (game_id → списки) из нормализованной таксономии. */
+async function fetchTags(
+  supabase: DB,
+  gameIds: number[]
+): Promise<Map<number, { categories: string[]; mechanics: string[] }>> {
+  const map = new Map<number, { categories: string[]; mechanics: string[] }>();
+  if (gameIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from("game_tags")
+    .select("game_id, tags(type, name)")
+    .in("game_id", gameIds);
+  if (error) {
+    log.error("fetchTags:", error.message);
+    return map;
+  }
+  for (const r of data ?? []) {
+    const tag = r.tags as { type: string; name: string } | null;
+    if (!tag) continue;
+    const entry = map.get(r.game_id) ?? { categories: [], mechanics: [] };
+    if (tag.type === "category") entry.categories.push(tag.name);
+    else if (tag.type === "mechanic") entry.mechanics.push(tag.name);
+    map.set(r.game_id, entry);
+  }
+  return map;
+}
+
+interface EnrichMaps {
+  bggMap: Map<number, BggExtra>;
+  versionMap: Map<number, { canonical_name: string; year_published: number | null }>;
+  localizedMap: Map<number, string>;
+  tagsMap: Map<number, { categories: string[]; mechanics: string[] }>;
+}
+
+/** Собирает CollectionGame из строки коллекции и заранее загруженных карт. */
+function buildCollectionGame(row: CollectionItemRow, maps: EnrichMaps): CollectionGame {
   const game = row.games;
   if (!game) throw new Error("Запись коллекции без связанной игры в кэше games");
+  const bgg = maps.bggMap.get(game.id);
+  const version = row.version_id != null ? maps.versionMap.get(row.version_id) : undefined;
+  const localized = maps.localizedMap.get(game.id);
+  // Приоритет имени: выбранная версия → локализованное имя → каноническое.
+  const name = version?.canonical_name ?? localized ?? game.name;
+  const primaryName = bgg?.primary_name ?? null;
+  const originalName = primaryName && primaryName !== name ? primaryName : null;
+  const tags = maps.tagsMap.get(game.id);
   const collection = row.collections ?? undefined;
   return {
     id: row.id,
     collectionId: row.collection_id,
     ...(collection ? { collectionName: collection.name } : {}),
     gameId: game.id,
-    bggId: game.bgg_id,
-    name: game.name,
-    originalName: game.original_name ?? null,
+    bggId: bgg?.bgg_id ?? null,
+    name,
+    originalName,
     yearPublished: game.year_published,
     thumbnailUrl: game.thumbnail_url,
     imageUrl: game.image_url,
@@ -84,10 +227,10 @@ function mapRow(row: CollectionItemRow): CollectionGame {
     maxPlayers: game.max_players,
     playingTime: game.playing_time,
     rating: game.rating,
-    weight: game.weight,
-    description: game.description ?? null,
-    categories: game.categories ?? [],
-    mechanics: game.mechanics ?? [],
+    weight: null, // поля weight больше нет в каталоге
+    description: bgg?.description ?? null,
+    categories: tags?.categories ?? [],
+    mechanics: tags?.mechanics ?? [],
     isExpansion: game.is_expansion ?? false,
     tags: row.tags ?? [],
     notes: row.notes ?? null,
@@ -95,10 +238,33 @@ function mapRow(row: CollectionItemRow): CollectionGame {
   };
 }
 
+/** Обогащает страницу строк коллекции (одним батчем запросов на сателлиты). */
+async function enrichRows(
+  supabase: DB,
+  rows: CollectionItemRow[],
+  lang: string,
+  withTags = false
+): Promise<CollectionGame[]> {
+  const gameIds = [...new Set(rows.map((r) => r.games?.id).filter((id): id is number => id != null))];
+  const versionIds = [...new Set(rows.map((r) => r.version_id).filter((v): v is number => v != null))];
+
+  const [bggMap, versionMap, localizedMap, tagsMap] = await Promise.all([
+    fetchGamesBgg(supabase, gameIds),
+    fetchVersions(supabase, versionIds),
+    fetchLocalizedNames(supabase, gameIds, langName(lang)),
+    withTags
+      ? fetchTags(supabase, gameIds)
+      : Promise.resolve(new Map<number, { categories: string[]; mechanics: string[] }>()),
+  ]);
+
+  const maps: EnrichMaps = { bggMap, versionMap, localizedMap, tagsMap };
+  return rows.map((r) => buildCollectionGame(r, maps));
+}
+
 /** Пополняет каталог games деталями BGG через SECURITY DEFINER функцию
  *  cache_game и возвращает наш games.id. Кэш игр закрыт на прямую запись
  *  (RLS — только админ); cache_game лишь ВСТАВЛЯЕТ отсутствующую игру и никогда
- *  не перезаписывает существующую (защита от вандализма). См. 20260622150000. */
+ *  не перезаписывает существующую (защита от вандализма). */
 async function cacheGameFromDetails(
   supabase: DB,
   details: BggGameDetails
@@ -129,41 +295,40 @@ async function cacheGameFromDetails(
   return gameId;
 }
 
-/** Если игра — дополнение, кэширует её базовые игры и создаёт связи в game_links
- *  (через SECURITY DEFINER link_expansion). Best-effort: ошибки не валят
- *  добавление самой игры. Базу кэшируем, чтобы её обложку/название можно было
- *  показать (в т.ч. ч/б) даже когда базовой игры нет в коллекции. */
-async function linkExpansionBases(
+/** Подбирает версию (издание) игры на языке пользователя: самую новую по году.
+ *  Нет версии на этом языке — null (игра добавится без привязки к версии). */
+async function pickVersionId(
   supabase: DB,
-  expansionGameId: number,
-  details: BggGameDetails
-): Promise<void> {
-  if (!details.isExpansion || details.baseGames.length === 0) return;
-  for (const base of details.baseGames) {
-    try {
-      const baseDetails = await getBggGameDetails(base.bggId);
-      if (!baseDetails) continue;
-      const baseGameId = await cacheGameFromDetails(supabase, baseDetails);
-      const { error } = await supabase.rpc("link_expansion", {
-        p_addon_game_id: expansionGameId,
-        p_base_game_id: baseGameId,
-      });
-      if (error) log.error(`link_expansion ${expansionGameId}→${baseGameId}:`, error.message);
-    } catch (e) {
-      log.error(`связь с базой bggId=${base.bggId} не создана:`, e);
-    }
+  gameId: number,
+  lang: string
+): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("game_bgg_versions")
+    .select("id, year_published, languages!inner(name)")
+    .eq("game_id", gameId)
+    .eq("languages.name", langName(lang))
+    .order("year_published", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    log.error(`pickVersionId game=${gameId}:`, error.message);
+    return null;
   }
+  return data?.id ?? null;
 }
 
-/** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию. */
+/** Подтягивает игру из BGG, кладёт в кэш games и добавляет в коллекцию. В записи
+ *  коллекции сохраняем конкретную версию (издание) на языке пользователя, если
+ *  такая есть. */
 export async function addGameToCollection(
   supabase: DB,
   collectionId: string,
   bggId: number,
   tags: string[] = [],
-  userId?: string
+  userId?: string,
+  lang: string = DEFAULT_LANG
 ): Promise<{ name: string }> {
-  log.info(`addGameToCollection collection=${collectionId} bggId=${bggId}, tags=[${tags.join(", ")}]`);
+  log.info(`addGameToCollection collection=${collectionId} bggId=${bggId}, lang=${lang}, tags=[${tags.join(", ")}]`);
   const details = await getBggGameDetails(bggId);
   if (!details) {
     log.error(`BGG детали для id=${bggId} не найдены`);
@@ -174,9 +339,10 @@ export async function addGameToCollection(
   // cache_game возвращает строку games (с нашим id) — по нему привязываем запись
   // коллекции (collection_items.game_id), не зная деталей внутреннего id заранее.
   const gameId = await cacheGameFromDetails(supabase, details);
+  const versionId = await pickVersionId(supabase, gameId, lang);
 
   const { error: itemError } = await supabase.from("collection_items").upsert(
-    { collection_id: collectionId, game_id: gameId, tags, added_by: userId ?? null },
+    { collection_id: collectionId, game_id: gameId, tags, added_by: userId ?? null, version_id: versionId },
     { onConflict: "collection_id,game_id" }
   );
   if (itemError) {
@@ -184,10 +350,7 @@ export async function addGameToCollection(
     throw new Error(`Не удалось добавить в коллекцию: ${itemError.message}`);
   }
 
-  // Дополнение — связываем с базовыми играми (после добавления, best-effort).
-  await linkExpansionBases(supabase, gameId, details);
-
-  log.info(`«${details.name}» добавлена в collection=${collectionId}`);
+  log.info(`«${details.name}» добавлена в collection=${collectionId} (version=${versionId ?? "—"})`);
   return { name: details.name };
 }
 
@@ -204,8 +367,8 @@ export async function removeGameFromCollection(
   if (error) throw new Error(`Не удалось удалить: ${error.message}`);
 }
 
-/** Переносит запись игры из одной коллекции в другую. Теги и заметку
- *  сохраняем. Каталог games не трогаем — игра уже там. */
+/** Переносит запись игры из одной коллекции в другую. Теги, заметку и выбранную
+ *  версию сохраняем. Каталог games не трогаем — игра уже там. */
 export async function moveGameToCollection(
   supabase: DB,
   fromCollectionId: string,
@@ -217,7 +380,7 @@ export async function moveGameToCollection(
 
   const { data: existing, error: selErr } = await supabase
     .from("collection_items")
-    .select("tags, notes")
+    .select("tags, notes, version_id")
     .eq("game_id", gameId)
     .eq("collection_id", fromCollectionId)
     .maybeSingle();
@@ -225,9 +388,10 @@ export async function moveGameToCollection(
   if (!existing) throw new Error("Игра не найдена в исходной коллекции");
   const tags = existing.tags ?? [];
   const notes = existing.notes ?? null;
+  const versionId = existing.version_id ?? null;
 
   const { error: insErr } = await supabase.from("collection_items").upsert(
-    { collection_id: toCollectionId, game_id: gameId, tags, notes, added_by: userId },
+    { collection_id: toCollectionId, game_id: gameId, tags, notes, version_id: versionId, added_by: userId },
     { onConflict: "collection_id,game_id" }
   );
   if (insErr) throw new Error(`Не удалось переместить: ${insErr.message}`);
@@ -269,44 +433,52 @@ export async function updateCollectionItem(
   if (error) throw new Error(`Не удалось сохранить: ${error.message}`);
 }
 
-/** Правит общий кэш игры (games) — название, год, число игроков, время, описание. */
+/** Правит кэш игры: имя/год/число игроков/время — в games, описание — в games_bgg. */
 export async function updateGameInfo(
   supabase: DB,
   gameId: number,
   info: GameInfoUpdate
 ): Promise<void> {
-  const patch: Database["public"]["Tables"]["games"]["Update"] = {
-    updated_at: new Date().toISOString(),
-  };
+  const patch: Database["public"]["Tables"]["games"]["Update"] = {};
   if (info.name !== undefined) patch.name = info.name;
   if (info.yearPublished !== undefined) patch.year_published = info.yearPublished;
   if (info.minPlayers !== undefined) patch.min_players = info.minPlayers;
   if (info.maxPlayers !== undefined) patch.max_players = info.maxPlayers;
   if (info.playingTime !== undefined) patch.playing_time = info.playingTime;
-  if (info.description !== undefined) patch.description = info.description;
+  if (Object.keys(patch).length > 0) {
+    patch.updated_at = new Date().toISOString();
+    const { error } = await supabase.from("games").update(patch).eq("id", gameId);
+    if (error) throw new Error(`Не удалось обновить игру: ${error.message}`);
+  }
 
-  const { error } = await supabase
-    .from("games")
-    .update(patch)
-    .eq("id", gameId);
-  if (error) throw new Error(`Не удалось обновить игру: ${error.message}`);
+  if (info.description !== undefined) {
+    const { error } = await supabase
+      .from("games_bgg")
+      .update({ description: info.description })
+      .eq("game_id", gameId);
+    if (error) throw new Error(`Не удалось обновить описание: ${error.message}`);
+  }
 }
+
+const ITEM_SELECT = "id, collection_id, game_id, tags, notes, added_at, version_id, games(*)";
 
 /** Одна игра из коллекции по gameId (для страницы игры). */
 export async function getCollectionGame(
   supabase: DB,
   collectionId: string,
-  gameId: number
+  gameId: number,
+  lang: string = DEFAULT_LANG
 ): Promise<CollectionGame | null> {
   const { data, error } = await supabase
     .from("collection_items")
-    .select("id, collection_id, game_id, tags, notes, added_at, games(*)")
+    .select(ITEM_SELECT)
     .eq("game_id", gameId)
     .eq("collection_id", collectionId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  return mapRow(data);
+  const [game] = await enrichRows(supabase, [data as unknown as CollectionItemRow], lang, true);
+  return game;
 }
 
 /** Строит страницу из выбранных (limit+1) строк: курсор следующей страницы —
@@ -334,6 +506,7 @@ function cursorClause(raw: string | null | undefined): string | null {
 export interface ListOptions {
   cursor?: string | null;
   limit?: number;
+  lang?: string;
 }
 
 /** Страница игр одной коллекции (курсорная пагинация по added_at+id). */
@@ -345,7 +518,7 @@ export async function listCollection(
   const limit = clampLimit(opts.limit);
   let query = supabase
     .from("collection_items")
-    .select("id, collection_id, game_id, tags, notes, added_at, games(*)")
+    .select(ITEM_SELECT)
     .eq("collection_id", collectionId);
   const clause = cursorClause(opts.cursor);
   if (clause) query = query.or(clause);
@@ -356,7 +529,12 @@ export async function listCollection(
     .limit(limit + 1);
   if (error) throw new Error(error.message);
 
-  return pageFrom((data ?? []).map(mapRow), limit);
+  const enriched = await enrichRows(
+    supabase,
+    (data ?? []) as unknown as CollectionItemRow[],
+    opts.lang ?? DEFAULT_LANG
+  );
+  return pageFrom(enriched, limit);
 }
 
 /** Совпадение из нашей БД по основному или альтернативному названию. */
@@ -374,16 +552,15 @@ export interface LocalGameMatch {
 /**
  * Ищет игры в нашей БД по основному И альтернативным названиям (RPC
  * `search_games` — триграммный fuzzy-поиск по таблице game_names). Принимает
- * несколько вариантов запроса (например, как сказал пользователь и переведённое
- * на оригинал название) и объединяет результаты, сохраняя порядок и убирая дубли
- * по нашему game_id. Возвращает и не-BGG игры (bggId = null) — теперь
- * collection_items ссылается на games.id, поэтому они полноправны. Best-effort:
- * при ошибке RPC (например, демо-режим) возвращает пустой список, и вызывающий
- * код откатывается на поиск BGG. */
+ * несколько вариантов запроса и объединяет результаты, сохраняя порядок и убирая
+ * дубли по нашему game_id. Имя возвращается на языке пользователя. Best-effort:
+ * при ошибке RPC возвращает пустой список, и вызывающий код откатывается на BGG.
+ */
 export async function searchLocalGames(
   supabase: DB,
   queries: string[],
-  limit = 4
+  limit = 4,
+  lang: string = DEFAULT_LANG
 ): Promise<LocalGameMatch[]> {
   const seen = new Set<number>();
   const out: LocalGameMatch[] = [];
@@ -392,7 +569,11 @@ export async function searchLocalGames(
   ];
 
   for (const q of uniqueQueries) {
-    const { data, error } = await supabase.rpc("search_games", { q, lim: limit });
+    const { data, error } = await supabase.rpc("search_games", {
+      q,
+      lim: limit,
+      p_lang: langName(lang),
+    });
     if (error) {
       logger.child("search_games").error(`«${q}»:`, error.message);
       continue;
@@ -432,22 +613,21 @@ export interface BrowsePage {
 
 /**
  * Постраничный обзор каталога games (RPC `browse_games`) — обычное
- * substring-совпадение по названию/альт-именам, без fuzzy. Используется
- * режимом «Умный поиск выключен» в окне добавления игр: пользователь просто
- * листает каталог и жмёт «+» у нужной игры. `collectionId` — чтобы помечать
- * уже добавленные в текущую коллекцию игры (in_collection).
+ * substring-совпадение по названию/альт-именам. Имя возвращается на языке
+ * пользователя. `collectionId` — чтобы помечать уже добавленные игры.
  */
 export async function browseGames(
   supabase: DB,
-  opts: { query?: string; collectionId?: string; page?: number; pageSize?: number } = {}
+  opts: { query?: string; collectionId?: string; page?: number; pageSize?: number; lang?: string } = {}
 ): Promise<BrowsePage> {
   const pageSize = clampLimit(opts.pageSize ?? 20);
   const page = Math.max(1, Math.trunc(opts.page ?? 1));
   const { data, error } = await supabase.rpc("browse_games", {
-    p_query: opts.query?.trim() || null,
-    p_collection_id: opts.collectionId ?? null,
+    p_query: opts.query?.trim() || undefined,
+    p_collection_id: opts.collectionId ?? undefined,
     p_limit: pageSize,
     p_offset: (page - 1) * pageSize,
+    p_lang: langName(opts.lang),
   });
   if (error) throw new Error(error.message);
   const rows = data ?? [];
@@ -465,9 +645,8 @@ export async function browseGames(
 }
 
 /**
- * Обложки игр из нашего кэша `games` по bgg_id. Возвращает только то, что уже
- * есть в БД — без обращений к BGG. Используется, чтобы показать превью
- * дополнений, не делая лишних запросов за теми, которых в каталоге ещё нет.
+ * Обложки игр из нашего кэша по bgg_id (теперь bgg_id живёт в games_bgg).
+ * Возвращает только то, что уже есть в БД — без обращений к BGG.
  */
 export async function getLocalThumbnails(
   supabase: DB,
@@ -478,7 +657,7 @@ export async function getLocalThumbnails(
   if (ids.length === 0) return out;
 
   const { data, error } = await supabase
-    .from("games")
+    .from("games_bgg")
     .select("bgg_id, thumbnail_url")
     .in("bgg_id", ids);
   if (error) {
@@ -535,14 +714,16 @@ export interface ExpansionMap {
 const EMPTY_EXPANSION_MAP: ExpansionMap = { byBase: {}, expansionToBase: {} };
 
 /**
- * Строит карту связей «дополнение↔база» по всей коллекции (одним проходом, без
- * пагинации — payload лёгкий, только сводки). Клиент по ней группирует карточки:
- * прячет дополнения, чья база в коллекции, рисует бейдж «+N допов» у базы и ч/б
- * карточку у осиротевших дополнений.
+ * Строит карту связей «дополнение↔база» по всей коллекции. В новой схеме
+ * game_links для link_type='expansion': **game_id = база, target_game_id =
+ * дополнение**. Клиент по карте группирует карточки: прячет дополнения, чья база
+ * в коллекции, рисует бейдж «+N допов» у базы и ч/б карточку у осиротевших
+ * дополнений. Имена баз/допов — на языке пользователя.
  */
 export async function getCollectionExpansionMap(
   supabase: DB,
-  collectionIds: string[]
+  collectionIds: string[],
+  lang: string = DEFAULT_LANG
 ): Promise<ExpansionMap> {
   if (collectionIds.length === 0) return EMPTY_EXPANSION_MAP;
 
@@ -565,40 +746,42 @@ export async function getCollectionExpansionMap(
   if (itemSet.size === 0) return EMPTY_EXPANSION_MAP;
 
   // 2) Связи expansion, у которых хотя бы одна сторона — игра из коллекции.
+  //    base = game_id, addon = target_game_id (только связи внутри нашего каталога).
   const ids = [...itemSet];
   const inList = `(${ids.join(",")})`;
   const { data: linkRows, error: linkErr } = await supabase
     .from("game_links")
-    .select("addon_game_id, base_game_id")
+    .select("game_id, target_game_id")
     .eq("link_type", "expansion")
-    .or(`addon_game_id.in.${inList},base_game_id.in.${inList}`);
+    .or(`game_id.in.${inList},target_game_id.in.${inList}`);
   if (linkErr) throw new Error(linkErr.message);
-  if (!linkRows || linkRows.length === 0) return EMPTY_EXPANSION_MAP;
 
-  // 3) Сводки всех игр, упомянутых в связях (для названий/обложек баз).
+  const links = (linkRows ?? [])
+    .map((l) => ({ baseId: l.game_id, expId: l.target_game_id }))
+    .filter((l): l is { baseId: number; expId: number } => l.expId != null);
+  if (links.length === 0) return EMPTY_EXPANSION_MAP;
+
+  // 3) Сводки всех игр, упомянутых в связях (имена/обложки), с локализацией.
   const refIds = new Set<number>();
-  for (const l of linkRows) {
-    refIds.add(l.addon_game_id);
-    refIds.add(l.base_game_id);
+  for (const l of links) {
+    refIds.add(l.baseId);
+    refIds.add(l.expId);
   }
-  const { data: gameRows, error: gameErr } = await supabase
-    .from("games")
-    .select("id, name, thumbnail_url, image_url")
-    .in("id", [...refIds]);
+  const refIdList = [...refIds];
+  const [{ data: gameRows, error: gameErr }, localizedNames] = await Promise.all([
+    supabase.from("games").select("id, name, thumbnail_url, image_url").in("id", refIdList),
+    fetchLocalizedNames(supabase, refIdList, langName(lang)),
+  ]);
   if (gameErr) throw new Error(gameErr.message);
-  const gameById = new Map(
-    (gameRows ?? []).map((g) => [g.id, g] as const)
-  );
+  const gameById = new Map((gameRows ?? []).map((g) => [g.id, g] as const));
+  const nameOf = (id: number) => localizedNames.get(id) ?? gameById.get(id)?.name ?? "";
 
-  // BGG иногда привязывает одно дополнение сразу к нескольким «базам» (см.
-  // docs/expansions-investigation.md, дефект #3) — собираем все базы каждого
-  // владеемого дополнения, чтобы решить, как его группировать, одним проходом.
+  // BGG иногда привязывает одно дополнение сразу к нескольким «базам» — собираем
+  // все базы каждого владеемого дополнения, чтобы решить, как его группировать.
   const basesByExp = new Map<number, Set<number>>();
-  for (const { addon_game_id: expId, base_game_id: baseId } of linkRows) {
+  for (const { baseId, expId } of links) {
     if (!itemSet.has(expId)) continue;
-    (basesByExp.get(expId) ?? basesByExp.set(expId, new Set()).get(expId)!).add(
-      baseId
-    );
+    (basesByExp.get(expId) ?? basesByExp.set(expId, new Set()).get(expId)!).add(baseId);
   }
 
   const byBase: Record<number, ExpansionSummary[]> = {};
@@ -608,7 +791,7 @@ export async function getCollectionExpansionMap(
     if (!exp) continue;
     const expSummary: ExpansionSummary = {
       gameId: expId,
-      name: exp.name,
+      name: nameOf(expId),
       thumbnailUrl: exp.thumbnail_url,
       collectionId: collectionByGame.get(expId) ?? collectionIds[0],
     };
@@ -617,9 +800,7 @@ export async function getCollectionExpansionMap(
     const ownedBaseIds = baseIds.filter((id) => itemSet.has(id));
 
     if (ownedBaseIds.length > 0) {
-      // Все владеемые базы получают бейдж «+N допов»; дополнение скрывается
-      // из общей сетки (present: true), под какой именно базой его искать —
-      // не важно для текущей логики скрытия.
+      // Все владеемые базы получают бейдж «+N допов»; дополнение скрывается.
       for (const baseId of ownedBaseIds) {
         (byBase[baseId] ??= []).push(expSummary);
       }
@@ -627,7 +808,7 @@ export async function getCollectionExpansionMap(
       if (base) {
         expansionToBase[expId] = {
           gameId: base.id,
-          name: base.name,
+          name: nameOf(base.id),
           thumbnailUrl: base.thumbnail_url,
           imageUrl: base.image_url,
           present: true,
@@ -641,7 +822,7 @@ export async function getCollectionExpansionMap(
       if (base) {
         expansionToBase[expId] = {
           gameId: chosenBaseId,
-          name: base.name,
+          name: nameOf(chosenBaseId),
           thumbnailUrl: base.thumbnail_url,
           imageUrl: base.image_url,
           present: false,
@@ -654,10 +835,7 @@ export async function getCollectionExpansionMap(
   return { byBase, expansionToBase };
 }
 
-/** Игры из коллекций самого пользователя (сводный вид «Все игры»).
- *  Берём только коллекции, в которых пользователь состоит (как и список вкладок),
- *  иначе RLS отдал бы ещё и чужие публичные коллекции и коллекции друзей.
- *  Имя коллекции приходит из joined-select. */
+/** Игры из коллекций самого пользователя (сводный вид «Все игры»). */
 export async function listAllGames(
   supabase: DB,
   userId: string,
@@ -669,7 +847,7 @@ export async function listAllGames(
   const limit = clampLimit(opts.limit);
   let query = supabase
     .from("collection_items")
-    .select("id, collection_id, game_id, tags, notes, added_at, games(*), collections(name)")
+    .select(`${ITEM_SELECT}, collections(name)`)
     .in("collection_id", ids);
   const clause = cursorClause(opts.cursor);
   if (clause) query = query.or(clause);
@@ -680,5 +858,10 @@ export async function listAllGames(
     .limit(limit + 1);
   if (error) throw new Error(error.message);
 
-  return pageFrom((data ?? []).map(mapRow), limit);
+  const enriched = await enrichRows(
+    supabase,
+    (data ?? []) as unknown as CollectionItemRow[],
+    opts.lang ?? DEFAULT_LANG
+  );
+  return pageFrom(enriched, limit);
 }

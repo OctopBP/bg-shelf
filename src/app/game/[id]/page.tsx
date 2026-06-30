@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCollectionGame, getCollectionExpansionMap } from "@/lib/collection";
+import { getCollectionGame, getCollectionExpansionMap, getUserLang } from "@/lib/collection";
 import GameDetail from "@/components/GameDetail";
 
 export default async function GamePage({
@@ -21,7 +21,8 @@ export default async function GamePage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const game = await getCollectionGame(supabase, collectionId, id);
+  const lang = await getUserLang(supabase, user.id);
+  const game = await getCollectionGame(supabase, collectionId, id, lang);
   if (!game) notFound();
 
   // Права определяет роль в коллекции.
@@ -34,7 +35,7 @@ export default async function GamePage({
   const canEdit = membership?.role === "owner" || membership?.role === "editor";
 
   // Дополнения этой игры, присутствующие в коллекции (для блока внизу страницы).
-  const expansionMap = await getCollectionExpansionMap(supabase, [collectionId]);
+  const expansionMap = await getCollectionExpansionMap(supabase, [collectionId], lang);
   const expansions = expansionMap.byBase[id] ?? [];
 
   return (

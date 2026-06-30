@@ -5,6 +5,7 @@ import { parseBody } from "@/lib/api/validation";
 import { logger } from "@/lib/logger";
 import { runCollectionAgent } from "@/lib/agent";
 import { parseAddCommand, buildProposal } from "@/lib/resolve";
+import { getUserLang } from "@/lib/collection";
 
 // LLM + агентный цикл + последовательные обращения к BGG (поиск/детали с 202-
 // ретраями) — самый долгий путь приложения, поэтому потолок выше обычного. См.
@@ -51,9 +52,10 @@ export async function POST(request: Request) {
     // Сначала определяем намерение. Добавление игр не выполняем сразу, а
     // возвращаем предложение — клиент покажет окно подтверждения. Остальные
     // команды (удалить, теги и т.п.) обрабатывает агент как раньше.
+    const lang = await getUserLang(supabase, user.id);
     const parsed = await parseAddCommand(command.trim(), reqId);
     if (parsed.intent === "add" && parsed.games.length > 0) {
-      const games = await buildProposal(parsed.games, supabase, reqId);
+      const games = await buildProposal(parsed.games, supabase, reqId, lang);
       log.info(`предложение за ${Date.now() - t0}мс, игр=${games.length}`);
       return NextResponse.json({ kind: "proposal", games });
     }
@@ -63,7 +65,8 @@ export async function POST(request: Request) {
       supabase,
       collectionId,
       user.id,
-      reqId
+      reqId,
+      lang
     );
     log.info(`успех за ${Date.now() - t0}мс, changed=${result.changed}`);
     return NextResponse.json({ kind: "reply", ...result });

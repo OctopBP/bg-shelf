@@ -52,6 +52,8 @@ export interface ItemRecord {
   notes: string | null;
   added_at: string;
   added_by: string | null;
+  /** Выбранная версия (издание). В демо-каталоге версий нет → всегда null. */
+  version_id: number | null;
 }
 
 /** Row shape returned by the joined select, matching the real query. */
@@ -62,6 +64,7 @@ export interface ItemRow {
   tags: string[];
   notes: string | null;
   added_at: string;
+  version_id: number | null;
   games: GameRecord | null;
   collections?: { name: string } | null;
 }
@@ -163,6 +166,7 @@ function seed() {
       notes: null,
       added_at: new Date(now - i * 60_000).toISOString(),
       added_by: DEMO_USER.id,
+      version_id: null,
     });
   });
   // Ещё одна игра в дефолтной коллекции.
@@ -174,6 +178,7 @@ function seed() {
     notes: null,
     added_at: new Date(now - 30_000).toISOString(),
     added_by: DEMO_USER.id,
+    version_id: null,
   });
 
   // --- Друзья (demo) -------------------------------------------------------
@@ -205,6 +210,7 @@ function seed() {
       notes: null,
       added_at: new Date(now - i * 60_000).toISOString(),
       added_by: FRIEND_USER.id,
+      version_id: null,
     });
   });
 
@@ -275,8 +281,8 @@ export function browseGames(
   };
 }
 
-/** Игры кэша по списку bgg_id — демо-аналог `select … from games where bgg_id in (…)`
- *  (используется для обложек дополнений в окне добавления). */
+/** Игры кэша по списку нашего id — демо-аналог `select … from games where id in (…)`
+ *  (сводки баз для карты дополнений). В моке id === bgg_id. */
 export function gamesByIds(ids: number[]): GameRecord[] {
   seed();
   return ids
@@ -284,12 +290,94 @@ export function gamesByIds(ids: number[]): GameRecord[] {
     .filter((g): g is GameRecord => g !== undefined);
 }
 
+// --- Сателлиты каталога (мультиисточниковая модель 28.06) -------------------
+// В демо вся BGG-деталь лежит в одном GameRecord; проецируем её в формы, которые
+// после рефактора отдают отдельные таблицы (games_bgg / game_names / game_tags).
+
+/** games_bgg по нашему game_id: bgg_id, описание, оригинальное (англ.) имя. */
+export function gamesBgg(
+  gameIds: number[]
+): { game_id: number; bgg_id: number; description: string | null; primary_name: string }[] {
+  seed();
+  const set = new Set(gameIds);
+  return [...games.values()]
+    .filter((g) => set.has(g.id))
+    .map((g) => ({
+      game_id: g.id,
+      bgg_id: g.bgg_id,
+      description: g.description,
+      primary_name: g.original_name ?? g.name,
+    }));
+}
+
+/** Обложки из games_bgg по bgg_id (getLocalThumbnails — превью дополнений). */
+export function thumbnailsByBggIds(
+  bggIds: number[]
+): { bgg_id: number; thumbnail_url: string | null }[] {
+  seed();
+  const set = new Set(bggIds);
+  return [...games.values()]
+    .filter((g) => set.has(g.bgg_id))
+    .map((g) => ({ bgg_id: g.bgg_id, thumbnail_url: g.thumbnail_url }));
+}
+
+/** Локализованные имена (game_names) на языке. lang — полное имя ('Russian' и
+ *  т.п.). В демо: 'English' → оригинал, иначе — основное (русское) имя. */
+export function localizedNames(
+  gameIds: number[],
+  lang: string
+): { game_id: number; name: string; is_display: boolean }[] {
+  seed();
+  const set = new Set(gameIds);
+  const out: { game_id: number; name: string; is_display: boolean }[] = [];
+  for (const g of games.values()) {
+    if (!set.has(g.id)) continue;
+    const name = lang === "English" ? g.original_name ?? g.name : g.name;
+    out.push({ game_id: g.id, name, is_display: true });
+  }
+  return out;
+}
+
+/** Таксономия (game_tags + tags): категории/механики игр по game_id. */
+export function gameTags(
+  gameIds: number[]
+): { game_id: number; tags: { type: string; name: string } }[] {
+  seed();
+  const set = new Set(gameIds);
+  const out: { game_id: number; tags: { type: string; name: string } }[] = [];
+  for (const g of games.values()) {
+    if (!set.has(g.id)) continue;
+    for (const name of g.categories) out.push({ game_id: g.id, tags: { type: "category", name } });
+    for (const name of g.mechanics) out.push({ game_id: g.id, tags: { type: "mechanic", name } });
+  }
+  return out;
+}
+
+/** Связи expansion в новой форме game_links: **game_id = база, target_game_id =
+ *  дополнение**. Если задан scope (ids) — только связи, касающиеся этих игр. */
+export function expansionLinks(
+  ids: number[]
+): { game_id: number; target_game_id: number }[] {
+  seed();
+  const wanted = new Set(ids);
+  const links: { game_id: number; target_game_id: number }[] = [];
+  for (const base of MOCK_GAMES) {
+    for (const exp of base.expansions ?? []) {
+      links.push({ game_id: base.bggId, target_game_id: exp.bggId });
+    }
+  }
+  return wanted.size === 0
+    ? links
+    : links.filter((l) => wanted.has(l.game_id) || wanted.has(l.target_game_id));
+}
+
 // --- Collection items ------------------------------------------------------
 export function upsertItem(
   collectionId: string,
   gameId: number,
   tags: string[],
-  addedBy?: string | null
+  addedBy?: string | null,
+  versionId?: number | null
 ): void {
   seed();
   const existing = items.find(
@@ -297,6 +385,7 @@ export function upsertItem(
   );
   if (existing) {
     existing.tags = tags;
+    if (versionId !== undefined) existing.version_id = versionId;
     return;
   }
   items.push({
@@ -307,6 +396,7 @@ export function upsertItem(
     notes: null,
     added_at: new Date().toISOString(),
     added_by: addedBy ?? null,
+    version_id: versionId ?? null,
   });
 }
 
@@ -340,6 +430,7 @@ function toRow(i: ItemRecord, withCollection: boolean): ItemRow {
     tags: i.tags,
     notes: i.notes,
     added_at: i.added_at,
+    version_id: i.version_id,
     games: games.get(i.game_id) ?? null,
     ...(withCollection
       ? {

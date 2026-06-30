@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
   public: {
     Tables: {
       collection_items: {
@@ -18,6 +23,7 @@ export type Database = {
           id: string
           notes: string | null
           tags: string[]
+          version_id: number | null
         }
         Insert: {
           added_at?: string
@@ -27,6 +33,7 @@ export type Database = {
           id?: string
           notes?: string | null
           tags?: string[]
+          version_id?: number | null
         }
         Update: {
           added_at?: string
@@ -36,6 +43,7 @@ export type Database = {
           id?: string
           notes?: string | null
           tags?: string[]
+          version_id?: number | null
         }
         Relationships: [
           {
@@ -50,6 +58,13 @@ export type Database = {
             columns: ["game_id"]
             isOneToOne: false
             referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_items_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "game_bgg_versions"
             referencedColumns: ["id"]
           },
         ]
@@ -110,6 +125,57 @@ export type Database = {
         }
         Relationships: []
       }
+      companies: {
+        Row: {
+          id: number
+          name: string
+        }
+        Insert: {
+          id?: never
+          name: string
+        }
+        Update: {
+          id?: never
+          name?: string
+        }
+        Relationships: []
+      }
+      company_external_ids: {
+        Row: {
+          company_id: number
+          external_id: string
+          source_id: number
+          url: string | null
+        }
+        Insert: {
+          company_id: number
+          external_id: string
+          source_id?: number
+          url?: string | null
+        }
+        Update: {
+          company_id?: number
+          external_id?: string
+          source_id?: number
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_external_ids_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_external_ids_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contributor_external_ids: {
         Row: {
           contributor_id: number
@@ -128,29 +194,6 @@ export type Database = {
           external_id?: string
           source?: string
           url?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "contributor_external_ids_contributor_id_fkey"
-            columns: ["contributor_id"]
-            isOneToOne: false
-            referencedRelation: "contributors"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      contributors: {
-        Row: {
-          id: number
-          name: string
-        }
-        Insert: {
-          id?: never
-          name: string
-        }
-        Update: {
-          id?: never
-          name?: string
         }
         Relationships: []
       }
@@ -181,79 +224,96 @@ export type Database = {
         }
         Relationships: []
       }
-      game_bgg_stats: {
+      game_bgg_versions: {
         Row: {
-          average: number | null
-          bayes_average: number | null
-          best_players: string | null
+          bgg_version_id: number | null
+          canonical_name: string
           game_id: number
-          rank: number | null
-          recommended_players: string | null
-          subcategory_ranks: Json
-          updated_at: string
-          users_rated: number | null
+          id: number
+          image_url: string | null
+          language_id: number | null
+          norm: string
+          thumbnail_url: string | null
+          year_published: number | null
         }
         Insert: {
-          average?: number | null
-          bayes_average?: number | null
-          best_players?: string | null
+          bgg_version_id?: number | null
+          canonical_name: string
           game_id: number
-          rank?: number | null
-          recommended_players?: string | null
-          subcategory_ranks?: Json
-          updated_at?: string
-          users_rated?: number | null
+          id?: never
+          image_url?: string | null
+          language_id?: number | null
+          norm?: string
+          thumbnail_url?: string | null
+          year_published?: number | null
         }
         Update: {
-          average?: number | null
-          bayes_average?: number | null
-          best_players?: string | null
+          bgg_version_id?: number | null
+          canonical_name?: string
           game_id?: number
-          rank?: number | null
-          recommended_players?: string | null
-          subcategory_ranks?: Json
-          updated_at?: string
-          users_rated?: number | null
+          id?: never
+          image_url?: string | null
+          language_id?: number | null
+          norm?: string
+          thumbnail_url?: string | null
+          year_published?: number | null
         }
         Relationships: [
           {
-            foreignKeyName: "game_bgg_stats_game_id_fkey"
+            foreignKeyName: "game_bgg_versions_game_id_fkey"
             columns: ["game_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_bgg_versions_language_id_fkey"
+            columns: ["language_id"]
+            isOneToOne: false
+            referencedRelation: "languages"
             referencedColumns: ["id"]
           },
         ]
       }
-      game_contributors: {
+      game_credits: {
         Row: {
-          contributor_id: number
           game_id: number
+          person_id: number
           role: string
+          source_id: number
         }
         Insert: {
-          contributor_id: number
           game_id: number
+          person_id: number
           role: string
+          source_id?: number
         }
         Update: {
-          contributor_id?: number
           game_id?: number
+          person_id?: number
           role?: string
+          source_id?: number
         }
         Relationships: [
           {
-            foreignKeyName: "game_contributors_contributor_id_fkey"
-            columns: ["contributor_id"]
-            isOneToOne: false
-            referencedRelation: "contributors"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "game_contributors_game_id_fkey"
+            foreignKeyName: "game_credits_game_id_fkey"
             columns: ["game_id"]
             isOneToOne: false
             referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_credits_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_credits_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
             referencedColumns: ["id"]
           },
         ]
@@ -262,19 +322,19 @@ export type Database = {
         Row: {
           external_id: string
           game_id: number
-          source: string
+          source_id: number
           url: string | null
         }
         Insert: {
           external_id: string
           game_id: number
-          source: string
+          source_id?: number
           url?: string | null
         }
         Update: {
           external_id?: string
           game_id?: number
-          source?: string
+          source_id?: number
           url?: string | null
         }
         Relationships: [
@@ -285,35 +345,58 @@ export type Database = {
             referencedRelation: "games"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "game_external_ids_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
         ]
       }
       game_links: {
         Row: {
-          addon_game_id: number
-          base_game_id: number
+          game_id: number
           link_type: string
+          name: string | null
+          source_id: number
+          target_bgg_id: number
+          target_game_id: number | null
         }
         Insert: {
-          addon_game_id: number
-          base_game_id: number
+          game_id: number
           link_type: string
+          name?: string | null
+          source_id?: number
+          target_bgg_id: number
+          target_game_id?: number | null
         }
         Update: {
-          addon_game_id?: number
-          base_game_id?: number
+          game_id?: number
           link_type?: string
+          name?: string | null
+          source_id?: number
+          target_bgg_id?: number
+          target_game_id?: number | null
         }
         Relationships: [
           {
-            foreignKeyName: "game_links_addon_game_id_fkey"
-            columns: ["addon_game_id"]
+            foreignKeyName: "game_links_game_id_fkey"
+            columns: ["game_id"]
             isOneToOne: false
             referencedRelation: "games"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "game_links_base_game_id_fkey"
-            columns: ["base_game_id"]
+            foreignKeyName: "game_links_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_links_target_game_id_fkey"
+            columns: ["target_game_id"]
             isOneToOne: false
             referencedRelation: "games"
             referencedColumns: ["id"]
@@ -324,26 +407,32 @@ export type Database = {
         Row: {
           game_id: number
           id: number
+          is_display: boolean
           lang: string | null
           name: string
           name_type: string
           norm: string
+          source_id: number
         }
         Insert: {
           game_id: number
           id?: never
+          is_display?: boolean
           lang?: string | null
           name: string
           name_type: string
           norm?: string
+          source_id?: number
         }
         Update: {
           game_id?: number
           id?: never
+          is_display?: boolean
           lang?: string | null
           name?: string
           name_type?: string
           norm?: string
+          source_id?: number
         }
         Relationships: [
           {
@@ -353,89 +442,366 @@ export type Database = {
             referencedRelation: "games"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "game_names_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      game_publishers: {
+        Row: {
+          company_id: number
+          game_id: number
+          source_id: number
+        }
+        Insert: {
+          company_id: number
+          game_id: number
+          source_id?: number
+        }
+        Update: {
+          company_id?: number
+          game_id?: number
+          source_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_publishers_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_publishers_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_publishers_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      game_tags: {
+        Row: {
+          game_id: number
+          source_id: number
+          tag_id: number
+        }
+        Insert: {
+          game_id: number
+          source_id?: number
+          tag_id: number
+        }
+        Update: {
+          game_id?: number
+          source_id?: number
+          tag_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_tags_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_tags_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      game_version_artists: {
+        Row: {
+          person_id: number
+          role: string
+          version_id: number
+        }
+        Insert: {
+          person_id: number
+          role?: string
+          version_id: number
+        }
+        Update: {
+          person_id?: number
+          role?: string
+          version_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_version_artists_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_version_artists_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "game_bgg_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      game_version_publishers: {
+        Row: {
+          company_id: number
+          version_id: number
+        }
+        Insert: {
+          company_id: number
+          version_id: number
+        }
+        Update: {
+          company_id?: number
+          version_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_version_publishers_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "game_version_publishers_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "game_bgg_versions"
+            referencedColumns: ["id"]
+          },
         ]
       }
       games: {
         Row: {
-          bgg_id: number | null
-          categories: string[] | null
           created_at: string
-          description: string | null
-          families: string[]
           id: number
           image_url: string | null
           is_expansion: boolean
           max_players: number | null
-          max_playtime: number | null
-          mechanics: string[] | null
-          min_age: number | null
           min_players: number | null
-          min_playtime: number | null
           name: string
-          original_name: string | null
+          num_ratings: number | null
           playing_time: number | null
+          primary_source_id: number
+          rank: number | null
           rating: number | null
           slug: string | null
-          source: string
           thumbnail_url: string | null
-          type: string | null
           updated_at: string
-          weight: number | null
           year_published: number | null
         }
         Insert: {
-          bgg_id?: number | null
-          categories?: string[] | null
           created_at?: string
-          description?: string | null
-          families?: string[]
           id?: never
           image_url?: string | null
           is_expansion?: boolean
           max_players?: number | null
-          max_playtime?: number | null
-          mechanics?: string[] | null
-          min_age?: number | null
           min_players?: number | null
-          min_playtime?: number | null
           name: string
-          original_name?: string | null
+          num_ratings?: number | null
           playing_time?: number | null
+          primary_source_id?: number
+          rank?: number | null
           rating?: number | null
           slug?: string | null
-          source?: string
           thumbnail_url?: string | null
-          type?: string | null
           updated_at?: string
-          weight?: number | null
           year_published?: number | null
         }
         Update: {
-          bgg_id?: number | null
-          categories?: string[] | null
           created_at?: string
-          description?: string | null
-          families?: string[]
           id?: never
           image_url?: string | null
           is_expansion?: boolean
           max_players?: number | null
+          min_players?: number | null
+          name?: string
+          num_ratings?: number | null
+          playing_time?: number | null
+          primary_source_id?: number
+          rank?: number | null
+          rating?: number | null
+          slug?: string | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          year_published?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "games_primary_source_id_fkey"
+            columns: ["primary_source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      games_bgg: {
+        Row: {
+          average_rating: number | null
+          bgg_id: number
+          description: string | null
+          game_id: number
+          image_url: string | null
+          max_players: number | null
+          max_playtime: number | null
+          min_age: number | null
+          min_players: number | null
+          min_playtime: number | null
+          num_ratings: number | null
+          playing_time: number | null
+          primary_name: string
+          rank_overall: number | null
+          raw: Json | null
+          suggested_numplayers: Json
+          thumbnail_url: string | null
+          updated_at: string
+          year_published: number | null
+        }
+        Insert: {
+          average_rating?: number | null
+          bgg_id: number
+          description?: string | null
+          game_id: number
+          image_url?: string | null
+          max_players?: number | null
           max_playtime?: number | null
-          mechanics?: string[] | null
           min_age?: number | null
           min_players?: number | null
           min_playtime?: number | null
-          name?: string
-          original_name?: string | null
+          num_ratings?: number | null
           playing_time?: number | null
-          rating?: number | null
-          slug?: string | null
-          source?: string
+          primary_name: string
+          rank_overall?: number | null
+          raw?: Json | null
+          suggested_numplayers?: Json
           thumbnail_url?: string | null
-          type?: string | null
           updated_at?: string
-          weight?: number | null
           year_published?: number | null
+        }
+        Update: {
+          average_rating?: number | null
+          bgg_id?: number
+          description?: string | null
+          game_id?: number
+          image_url?: string | null
+          max_players?: number | null
+          max_playtime?: number | null
+          min_age?: number | null
+          min_players?: number | null
+          min_playtime?: number | null
+          num_ratings?: number | null
+          playing_time?: number | null
+          primary_name?: string
+          rank_overall?: number | null
+          raw?: Json | null
+          suggested_numplayers?: Json
+          thumbnail_url?: string | null
+          updated_at?: string
+          year_published?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "games_bgg_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: true
+            referencedRelation: "games"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      languages: {
+        Row: {
+          bgg_id: number | null
+          code: string | null
+          id: number
+          name: string
+        }
+        Insert: {
+          bgg_id?: number | null
+          code?: string | null
+          id?: never
+          name: string
+        }
+        Update: {
+          bgg_id?: number | null
+          code?: string | null
+          id?: never
+          name?: string
+        }
+        Relationships: []
+      }
+      person_external_ids: {
+        Row: {
+          external_id: string
+          person_id: number
+          source_id: number
+          url: string | null
+        }
+        Insert: {
+          external_id: string
+          person_id: number
+          source_id?: number
+          url?: string | null
+        }
+        Update: {
+          external_id?: string
+          person_id?: number
+          source_id?: number
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_external_ids_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "persons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_external_ids_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      persons: {
+        Row: {
+          id: number
+          name: string
+        }
+        Insert: {
+          id?: never
+          name: string
+        }
+        Update: {
+          id?: never
+          name?: string
         }
         Relationships: []
       }
@@ -575,18 +941,21 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          lang: string
           role: string
           username: string
         }
         Insert: {
           created_at?: string
           id: string
+          lang?: string
           role?: string
           username: string
         }
         Update: {
           created_at?: string
           id?: string
+          lang?: string
           role?: string
           username?: string
         }
@@ -619,6 +988,45 @@ export type Database = {
           name?: string
           slug?: string
           website_url?: string | null
+        }
+        Relationships: []
+      }
+      sources: {
+        Row: {
+          code: string
+          id: number
+          name: string | null
+        }
+        Insert: {
+          code: string
+          id: number
+          name?: string | null
+        }
+        Update: {
+          code?: string
+          id?: number
+          name?: string | null
+        }
+        Relationships: []
+      }
+      tags: {
+        Row: {
+          bgg_id: number | null
+          id: number
+          name: string
+          type: string
+        }
+        Insert: {
+          bgg_id?: number | null
+          id?: never
+          name: string
+          type: string
+        }
+        Update: {
+          bgg_id?: number | null
+          id?: never
+          name?: string
+          type?: string
         }
         Relationships: []
       }
@@ -668,6 +1076,24 @@ export type Database = {
         }
       }
       are_friends: { Args: { other: string }; Returns: boolean }
+      browse_games: {
+        Args: {
+          p_collection_id?: string
+          p_lang?: string
+          p_limit?: number
+          p_offset?: number
+          p_query?: string
+        }
+        Returns: {
+          bgg_id: number
+          id: number
+          in_collection: boolean
+          name: string
+          thumbnail_url: string
+          total_count: number
+          year_published: number
+        }[]
+      }
       cache_game: {
         Args: {
           p_bgg_id: number
@@ -687,30 +1113,21 @@ export type Database = {
           p_year_published?: number
         }
         Returns: {
-          bgg_id: number | null
-          categories: string[] | null
           created_at: string
-          description: string | null
-          families: string[]
           id: number
           image_url: string | null
           is_expansion: boolean
           max_players: number | null
-          max_playtime: number | null
-          mechanics: string[] | null
-          min_age: number | null
           min_players: number | null
-          min_playtime: number | null
           name: string
-          original_name: string | null
+          num_ratings: number | null
           playing_time: number | null
+          primary_source_id: number
+          rank: number | null
           rating: number | null
           slug: string | null
-          source: string
           thumbnail_url: string | null
-          type: string | null
           updated_at: string
-          weight: number | null
           year_published: number | null
         }
         SetofOptions: {
@@ -745,23 +1162,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      browse_games: {
-        Args: {
-          p_query?: string | null
-          p_collection_id?: string | null
-          p_limit?: number
-          p_offset?: number
-        }
-        Returns: {
-          id: number
-          bgg_id: number | null
-          name: string
-          year_published: number | null
-          thumbnail_url: string | null
-          in_collection: boolean
-          total_count: number
-        }[]
-      }
       generate_username: { Args: { email: string }; Returns: string }
       is_admin: { Args: { uid: string }; Returns: boolean }
       is_collection_member: {
@@ -770,45 +1170,16 @@ export type Database = {
       }
       is_friend_collection: { Args: { cid: string }; Returns: boolean }
       is_public_collection: { Args: { cid: string }; Returns: boolean }
-      link_expansion: {
-        Args: { p_addon_game_id: number; p_base_game_id: number }
-        Returns: undefined
-      }
       search_games: {
-        Args: { lim?: number; q: string }
+        Args: { lim?: number; p_lang?: string; q: string }
         Returns: {
-          bgg_id: number | null
-          categories: string[] | null
-          created_at: string
-          description: string | null
-          families: string[]
+          bgg_id: number
           id: number
-          image_url: string | null
           is_expansion: boolean
-          max_players: number | null
-          max_playtime: number | null
-          mechanics: string[] | null
-          min_age: number | null
-          min_players: number | null
-          min_playtime: number | null
           name: string
-          original_name: string | null
-          playing_time: number | null
-          rating: number | null
-          slug: string | null
-          source: string
-          thumbnail_url: string | null
-          type: string | null
-          updated_at: string
-          weight: number | null
-          year_published: number | null
+          thumbnail_url: string
+          year_published: number
         }[]
-        SetofOptions: {
-          from: "*"
-          to: "games"
-          isOneToOne: false
-          isSetofReturn: true
-        }
       }
       share_collection: {
         Args: { cid: string; invitee_email: string; member_role: string }
@@ -955,4 +1326,3 @@ export const Constants = {
     },
   },
 } as const
-
