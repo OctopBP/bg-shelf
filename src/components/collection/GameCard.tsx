@@ -1,8 +1,10 @@
 import Link from "next/link";
 import {
   IconCircleCheckFilled,
+  IconClockFilled,
   IconFolderSymlink,
   IconStarFilled,
+  IconUserFilled,
   IconX,
 } from "@tabler/icons-react";
 import type {
@@ -138,7 +140,7 @@ export default function GameCard({
           ) : (
             <Link href={href}>
               <h3
-                className="truncate font-bold text-ink hover:text-brand"
+                className="truncate font-bold leading-none text-ink hover:text-brand"
                 title={coverName}
               >
                 {coverName}
@@ -150,19 +152,35 @@ export default function GameCard({
               Базы нет в коллекции
             </p>
           ) : (
-            <p className="mt-1 text-xs font-medium text-ink/55">
+            <p className="inline-flex items-center gap-1 align-middle text-xs font-medium text-ink/55">
               {game.minPlayers && game.maxPlayers
-                ? game.minPlayers === game.maxPlayers
-                  ? `${game.minPlayers} игр.`
-                  : `${game.minPlayers}–${game.maxPlayers} игр.`
+                ? <p className="inline-flex items-center gap-0.5 font-bold">
+                  <IconUserFilled size={11} />
+                {game.minPlayers === game.maxPlayers
+                  ? `${game.minPlayers}`
+                  : `${game.minPlayers}–${game.maxPlayers}`
+                }
+                </p>
                 : ""}
-              {game.playingTime ? ` · ${game.playingTime} мин` : ""}
+              {game.playingTime ? (
+                <>
+                  <p>•</p>
+                  <p className="inline-flex items-center gap-0.5 font-bold">
+                  <IconClockFilled size={11} />
+                  <p>{`${game.playingTime}`}</p>
+                  </p>
+                </>
+              ) : (
+                ""
+              )}
               {game.rating ? (
-                <span className="inline-flex items-center gap-0.5 align-middle font-bold text-orange">
-                  {" · "}
-                  <IconStarFilled size={11} />
-                  {Number(game.rating).toFixed(1)}
-                </span>
+                <>
+                  <p>•</p>
+                  <p className="inline-flex items-center gap-0.5 text-orange font-bold">
+                    <IconStarFilled size={11} />
+                    {Number(game.rating).toFixed(1)}
+                  </p>
+                </>
               ) : (
                 ""
               )}
